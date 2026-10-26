@@ -38,7 +38,6 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
   const msg=String(error.message||"");
   if(/minimum|10000 IRR/i.test(msg)){await saveSession(chat,{state:"need_coins",coins:null,coupon:null});await say(chat,"مبلغ نهایی با این تخفیف کمتر از حداقل ۱۰٬۰۰۰ ریال بله است. لطفاً تعداد سکهٔ بیشتری برای سفارش تازه وارد کنید.");}
   else if(/already been redeemed/i.test(msg))await say(chat,"این کد رایگان قبلاً توسط این حساب استفاده شده است. از کد دیگری استفاده کنید.");
-  else if(/500 coins/i.test(msg)){await saveSession(chat,{state:"need_coins",coins:null,coupon:null});await say(chat,"هر دریافت رایگان با کد ۱۰۰٪ حداکثر ۵۰۰ سکه است؛ لطفاً تعداد سکه را دوباره وارد کنید.");}
   else await say(chat,"کد تخفیف یا سفارش پذیرفته نشد. وضعیت کد را بررسی کنید یا «ندارم» ارسال کنید.");
   return;
  }
