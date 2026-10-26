@@ -5,7 +5,7 @@ const db = createClient(URL, KEY, {auth:{persistSession:false,autoRefreshToken:f
 const ORIGINS = ["https://gptyar-web.github.io","http://localhost:5173","http://127.0.0.1:5173"];
 function headers(req:Request) { const origin=req.headers.get("origin")||"";return {"Access-Control-Allow-Origin":ORIGINS.includes(origin)?origin:"https://gptyar-web.github.io","Access-Control-Allow-Headers":"authorization,apikey,content-type,x-client-info","Access-Control-Allow-Methods":"POST,OPTIONS","Vary":"Origin","Content-Type":"application/json"}; }
 function json(req:Request,data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:headers(req)});}
-function requireOk<T>(result:{data:T|null,error:any}):T{if(result.error)throw new Error(result.error.message);if(result.data===null)throw new Error("اطلاعات موردنیاز یافت نشد.");return result.data;}
+function requireOk<T>(result:{data:T,error:any}):T{if(result.error)throw new Error(result.error.message);return result.data;}
 function fail(message:string):never {throw new Error(message);}
 function emailFor(name:string){return "ss-"+name+"@spaceshooter.invalid";}
 function onlyString(x:unknown,max=3000){return typeof x==="string"?x.trim().slice(0,max):"";}
@@ -13,8 +13,8 @@ function validPhone(p:string){return /^09\d{9}$/.test(p);}
 async function currentUser(req:Request){
  const token=(req.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
  if(!token)fail("ابتدا وارد حساب شوید.");
- const u=requireOk(await db.auth.getUser(token));
- if(!u.user)fail("نشست نامعتبر است.");
+ const {data:u,error:userError}=await db.auth.getUser(token);
+ if(userError||!u?.user)fail("نشست نامعتبر است.");
  const profile=requireOk(await db.from("ss_profiles").select("*").eq("id",u.user.id).single());
  return profile;
 }
@@ -41,8 +41,9 @@ async function registration(b:any,req:Request){
   await allowRegistration(req,phone);
  const {data:old}=await db.from("ss_profiles").select("id").or("username.eq."+username+",phone.eq."+phone).limit(1);
  if(old?.length)fail("نام کاربری یا شماره موبایل قبلاً ثبت شده است.");
- const auth=requireOk(await db.auth.admin.createUser({email:emailFor(username),password,email_confirm:true}));
- const uid=auth.user?.id;if(!uid)fail("ساخت حساب ناموفق بود.");
+ const {data:auth,error:signupError}=await db.auth.admin.createUser({email:emailFor(username),password,email_confirm:true});
+  if(signupError||!auth?.user)fail("ساخت حساب ناموفق بود.");
+ const uid=auth.user.id;
  try{
   requireOk(await db.from("ss_profiles").insert({id:uid,username,first_name,last_name,phone,gender}));
   requireOk(await db.from("ss_wallets").insert({user_id:uid,balance:0}));
@@ -117,7 +118,8 @@ async function userAction(p:any,b:any){
   if(!Number.isSafeInteger(bytes)||bytes<1||bytes>t.file_limit)fail("حجم فایل از سقف مجاز این تیکت بیشتر است.");
   const path="ss/"+t.id+"/"+crypto.randomUUID()+"-"+onlyString(b.filename,70).replace(/[^a-zA-Z0-9._-]/g,"_");
   const signed=requireOk(await db.storage.from("ss-ticket-files").createSignedUploadUrl(path));
-  return {path,token:signed.token};
+  if(!signed)fail("ساخت لینک بارگذاری ناموفق بود.");
+   return {path,token:signed.token};
  }
  case "ticketFile":{
   const path=onlyString(b.path,500);
@@ -138,7 +140,8 @@ async function userAction(p:any,b:any){
   if(path){
    const file=path.split("/").pop()||"";
    const objects=requireOk(await db.storage.from("ss-ticket-files").list("ss/"+t.id,{search:file,limit:10}));
-   const uploaded=objects.find((x:any)=>x.name===file);
+   if(!objects)fail("فهرست فایل‌ها دریافت نشد.");
+    const uploaded=objects.find((x:any)=>x.name===file);
    const actual=Number(uploaded?.metadata?.size);
    if(!uploaded||!Number.isSafeInteger(actual)||actual<1||actual>t.file_limit)fail("فایل بارگذاری نشده یا از سقف تیکت بزرگ‌تر است.");
   }
@@ -183,10 +186,11 @@ async function adminAction(p:any,b:any){
   }
   if(uid===p.id&&updates.active===false)fail("مدیر نمی‌تواند حساب خود را غیرفعال کند.");
   const old=requireOk(await db.from("ss_profiles").select("username").eq("id",uid).single());
+   if(!old)fail("حساب یافت نشد.");
   const authUpdates:any={};
   if(updates.username&&updates.username!==old.username)authUpdates.email=emailFor(updates.username),authUpdates.email_confirm=true;
   if(b.password){if(String(b.password).length<10)fail("رمز حداقل ۱۰ کاراکتر باشد.");authUpdates.password=String(b.password);}
-  if(Object.keys(authUpdates).length)requireOk(await db.auth.admin.updateUserById(uid,authUpdates));
+  if(Object.keys(authUpdates).length){const r=await db.auth.admin.updateUserById(uid,authUpdates);if(r.error)throw r.error;}
   try {requireOk(await db.from("ss_profiles").update(updates).eq("id",uid));}
   catch(e){if(authUpdates.email)await db.auth.admin.updateUserById(uid,{email:emailFor(old.username),email_confirm:true});throw e;}
   return {saved:true};
