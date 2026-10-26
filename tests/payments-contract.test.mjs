@@ -31,7 +31,7 @@ test("startup and admin avoid redundant requests",()=>{
  assert.doesNotMatch(source,/\},500\)/);
  assert.match(source,/setInterval\(updateWallet,30000\)/);
  assert.match(source,/await import\("\.\/game\.js"\)/);
- assert.match(server,/pageQuery\(db\.from\("ss_orders"\)/);
+ assert.match(server,/pageQuery\(query\.is\("archived_at",null\)/);
 });
 
 test("archived orders retain financial history, reconcile safely and can be restored by an admin",()=>{
