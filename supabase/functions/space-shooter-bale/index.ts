@@ -19,30 +19,60 @@ async function saveSession(chat_id:number,updates:any){
  must(await db.from("ss_bale_sessions").upsert({...existing,chat_id,...updates,updated_at:new Date().toISOString()},{onConflict:"chat_id"}));
 }
 async function start(chat_id:number){await saveSession(chat_id,{state:"need_contact",user_id:null,coins:null,coupon:null});await say(chat_id,"به بازوی خرید سکه Space Shooter خوش آمدید! برای شناسایی حساب، با دکمه زیر شماره بله خودتان را به اشتراک بگذارید.",{reply_markup:contactKeyboard});}
+function invoiceErrorMessage(e:unknown){
+ const msg=e instanceof Error?e.message:"";
+ if(/total price must be at least 10000/i.test(msg))return "مبلغ پس از تخفیف کمتر از حداقل ۱۰٬۰۰۰ ریال بله است. تعداد سکه را افزایش دهید یا کد دیگری استفاده کنید.";
+ if(/provider.token|provider_token|wallet|merchant/i.test(msg))return "تنظیمات دریافت وجه در کیف پول بله باید توسط مدیر بررسی شود.";
+ return "درگاه بله صورتحساب را نپذیرفت. شماره سفارش را به پشتیبانی بدهید؛ اگر پرداختی نکرده‌اید، دوباره با تعداد یا کد دیگری تلاش کنید.";
+}
 async function makeInvoice(chat:number,s:any,coupon:string|null){
  const provider=await secret("provider_token");
- if(!provider){await say(chat,"درگاه کیف پول هنوز توسط مدیر تنظیم نشده است.");return;}
- const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});if(error){await say(chat,"کد تخفیف یا سفارش معتبر نیست: "+error.message+"\nکد صحیح بفرستید یا «ندارم» بنویسید.");return;}
+ let possiblyFree=false;
+ if(coupon){
+  const d=(await db.from("ss_discounts").select("kind,value").eq("code",coupon).maybeSingle()).data;
+  possiblyFree=d?.kind==="percent"&&d?.value===100;
+ }
+ if(!provider&&!possiblyFree){await say(chat,"توکن کیف پول بله در تنظیمات مدیر ثبت نشده است؛ صدور صورتحساب ممکن نیست.");return;}
+ const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});
+ if(error){
+  const msg=String(error.message||"");
+  if(/minimum|10000 IRR/i.test(msg))await say(chat,"مبلغ نهایی با این تخفیف کمتر از حداقل ۱۰٬۰۰۰ ریال بله است. تعداد سکه را افزایش دهید یا کد دیگری استفاده کنید.");
+  else if(/already been redeemed/i.test(msg))await say(chat,"این کد رایگان قبلاً توسط این حساب استفاده شده است. از کد دیگری استفاده کنید.");
+  else if(/500 coins/i.test(msg))await say(chat,"هر دریافت رایگان با کد ۱۰۰٪ حداکثر ۵۰۰ سکه است؛ برای سفارش جدید تعداد را کمتر انتخاب کنید.");
+  else await say(chat,"کد تخفیف یا سفارش پذیرفته نشد. وضعیت کد را بررسی کنید یا «ندارم» ارسال کنید.");
+  return;
+ }
  const order=Array.isArray(data)?data[0]:data;
  if(!order)throw Error("Order not created");
+ if(Number(order.amount_rial)===0){
+  await saveSession(chat,{state:"need_coins",coins:null,coupon:null});
+  await say(chat,"🎁 تخفیف ۱۰۰٪ اعمال شد! "+s.coins+" سکه بدون پرداخت به کیف پول بازی افزوده شد.\nشماره رسید: "+order.order_id+"\nبرای دریافت دوباره تعداد سکه را بفرستید.");
+  return;
+ }
+ if(!provider)throw Error("Paid order created with no provider token");
+ if(!Number.isSafeInteger(Number(order.amount_rial))||Number(order.amount_rial)<10000){
+  const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
+  if(cancelled.error)throw Error("Unable to cancel invalid invoice");
+  await say(chat,"مبلغ صورتحساب کمتر از حداقل مجاز بله است؛ سفارش بدون برداشت وجه لغو شد.");
+  return;
+ }
  try{
   await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
-  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,currency:"IRR",prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+   description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,currency:"IRR",
+   prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
  }catch(error){
-  // Only a definitive Bale API rejection allows refunding the reserved coupon.
-  // A timeout may mean the invoice was delivered; keep it pending for review.
   console.error("SpaceShooter invoice delivery failed",error instanceof Error?error.message:error);
   if(error instanceof BaleResponseError){
    const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
    if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
-   await say(chat,"صدور صورتحساب از سوی بله رد شد؛ سفارش لغو شد. دوباره تلاش کنید.");
+   await say(chat,invoiceErrorMessage(error)+"\nسفارش ردشده لغو شد.");
   }else{
-   await say(chat,"وضعیت ارسال صورتحساب مشخص نیست؛ برای جلوگیری از شارژ تکراری سفارش محفوظ مانده است. لطفاً وضعیت را از پشتیبانی پیگیری کنید.");
+   await say(chat,"وضعیت ارسال فاکتور نامشخص است و سفارش برای جلوگیری از خطای مالی محفوظ مانده است؛ لطفاً با پشتیبانی تماس بگیرید. شماره سفارش: "+order.order_id);
   }
   return;
  }
  await saveSession(chat,{state:"invoice",coupon});
- await say(chat,"صورتحساب ارسال شد. بعد از پرداخت موفق و تأیید تراکنش، سکه به‌صورت خودکار شارژ می‌شود.");
+ await say(chat,"✅ صورتحساب ارسال شد: "+Number(order.amount_rial).toLocaleString("fa-IR")+" ریال. پس از پرداخت موفق و استعلام تراکنش، سکه خودکار شارژ می‌شود.");
 }
 async function onMessage(msg:any){
  const chat=Number(msg.chat?.id),sender=Number(msg.from?.id),text=String(msg.text||"").trim();
