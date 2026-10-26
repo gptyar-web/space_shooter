@@ -263,6 +263,7 @@ document.addEventListener("click",async e=>{
  try{
   if(action==="auth-login"||action==="auth-register"){state.authTab=action==="auth-login"?"login":"register";renderAuth();}
   if(action==="refresh")await refresh(false);
+  if(action==="refresh-startup")window.location.reload();
   if(action==="chapter"){state.chapter=Number(id);renderLevels();}
   if(action==="start-level")await startLevel(Number(id));
   if(action==="retry-level")await startLevel(Number(id));
@@ -340,4 +341,8 @@ document.addEventListener("submit",async e=>{
 });
 document.addEventListener("change",e=>{if(e.target.matches("#admin-discount [name=date_unlimited]"))syncDiscountDateFields(e.target.form);});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDiscountCalendars();});
-init();
+init().catch(error => {
+ console.error("Space Shooter startup error",error);
+ const app=$("#app");
+ if(app)app.innerHTML='<section class="surface" style="max-width:650px;margin:45px auto;text-align:center"><h2>بارگذاری حساب ناموفق بود</h2><p>ارتباط با سرویس حساب برقرار نشد. اتصال اینترنت را بررسی کنید و صفحه را دوباره بارگذاری کنید.</p><button class="button" data-action="refresh-startup">تلاش دوباره</button></section>';
+});
