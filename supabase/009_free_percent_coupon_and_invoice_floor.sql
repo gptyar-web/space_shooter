@@ -40,7 +40,7 @@ begin
   then raise exception 'Discount code invalid, exhausted or expired'; end if;
   if v_discount.kind='percent' then
    v_free:=v_discount.value=100;
-   v_amount:=v_amount-(v_amount*v_discount.value/100);
+   v_amount:=v_amount-floor(v_amount::numeric*v_discount.value/100)::bigint;
   else
    v_amount:=greatest(1,v_amount-v_discount.value);
   end if;
