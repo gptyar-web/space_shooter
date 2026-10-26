@@ -82,7 +82,7 @@ async function userAction(p:any,b:any){
   }
   const recent=requireOk(await db.from("ss_runs").select("id").eq("user_id",p.id)
    .is("finished_at",null).gt("started_at",new Date(Date.now()-120000).toISOString()).limit(3));
-  if(recent.length>=3)fail("تعداد نبردهای هم‌زمان زیاد است؛ کمی بعد دوباره تلاش کنید.");
+  if((recent?.length||0)>=3)fail("تعداد نبردهای هم‌زمان زیاد است؛ کمی بعد دوباره تلاش کنید.");
   const run=requireOk(await db.from("ss_runs").insert({user_id:p.id,stage}).select("id,started_at,stage").single());
   return {...run,enemies:8+Math.min(12,Math.floor(stage/10))};
  }
@@ -192,7 +192,7 @@ async function adminAction(p:any,b:any){
   }
   if(uid===p.id&&updates.active===false)fail("مدیر نمی‌تواند حساب خود را غیرفعال کند.");
   const old=requireOk(await db.from("ss_profiles").select("username,phone").eq("id",uid).single());
-  if(updates.phone&&updates.phone!==old.phone){updates.bale_verified_at=null;updates.bale_user_id=null;}
+  if(updates.phone&&updates.phone!==old?.phone){updates.bale_verified_at=null;updates.bale_user_id=null;}
    if(!old)fail("حساب یافت نشد.");
   const authUpdates:any={};
   if(updates.username&&updates.username!==old.username)authUpdates.email=emailFor(updates.username),authUpdates.email_confirm=true;
