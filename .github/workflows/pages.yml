@@ -18,10 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Prepare static website
         run: |
           mkdir -p _site
-          cp index.html ./*.js style.css _site/
+          cp index.html ./*.js ./*.css _site/
+          node scripts/stamp-version.mjs
           node --test tests/site-deployment.test.mjs
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
