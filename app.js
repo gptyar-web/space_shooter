@@ -1,5 +1,5 @@
 import {createClient} from "https://esm.sh/@supabase/supabase-js@2.58.0?bundle";
-import {startShooter} from "./game.js";
+// The game engine loads only when a player starts a mission.
 import {jalaliMonths,jalaliToday,jalaliMonthGrid,parseJalaliDate,formatJalaliDate,jalaliFromISO,jalaliToISO,shiftJalaliMonth} from "./jalali-calendar.js";
 const PROJECT="https://efibfevyiepkwpnobaro.supabase.co";
 const PUBLIC_KEY="sb_publishable_zbEGYX6DGhjFRQf6FWiIWQ_IdYj84nW";
@@ -34,10 +34,10 @@ function syncDiscountValueField(form){
  const kind=form?.elements.namedItem("kind")?.value;
  const value=form?.elements.namedItem("value");
  if(!value)return;
- value.max=kind==="percent"?"99":"2147483647";
+ value.max=kind==="percent"?"100":"2147483647";
  const label=form.querySelector("#discount-value-hint");
  if(label)label.textContent=kind==="percent"
-  ?"تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ برای کد GALAXY50 مقدار ۵۰ را وارد کنید."
+  ?"تخفیف درصدی از ۱ تا ۱۰۰ مجاز است؛ ۱۰۰٪ یعنی دریافت رایگان (یک‌بار برای هر حساب، حداکثر ۵۰۰ سکه)."
   :"مبلغ ثابت تخفیف را به ریال وارد کنید.";
 }
 function discountCalendarMarkup(pop){
@@ -78,17 +78,24 @@ async function init(){
  const {data:{session}}=await client.auth.getSession();state.session=session;
  if(session){await refresh(true);}else renderAuth();
  client.auth.onAuthStateChange((_event,s)=>{state.session=s;if(!s){state.data=null;state.adminData=null;if(state.gameStop)state.gameStop();state.gameStop=null;renderAuth();}});
- setInterval(async()=>{
-  if(!state.session||!state.data||state.view==="game"||document.hidden)return;
-  const {data,error}=await client.from("ss_wallets").select("balance").eq("user_id",state.data.profile.id).maybeSingle();
-  if(!error&&data){state.data.balance=data.balance;const el=$("#coinbalance");if(el)el.textContent=num(data.balance);}
- },500);
+ let walletRefreshInFlight=false;
+ const updateWallet=async()=>{
+  if(walletRefreshInFlight||!state.session||!state.data||state.view==="game"||document.hidden)return;
+  walletRefreshInFlight=true;
+  try{
+   const data=await call("wallet");
+   if(data&&state.data){state.data.balance=data.balance;const el=$("#coinbalance");if(el)el.textContent=num(data.balance);}
+  }catch(e){console.warn("Wallet refresh deferred",e);}
+  finally{walletRefreshInFlight=false;}
+ };
+ setInterval(updateWallet,30000);
+ document.addEventListener("visibilitychange",()=>{if(!document.hidden)updateWallet();});
 }
 async function refresh(claim=false){
  if(!state.session)return;
  try{
+  if(claim){try{const r=await call("daily");const item=Array.isArray(r)?r[0]:r;if(item?.reward>0)toast("🎁 پاداش ورود امروز: "+num(item.reward)+" سکه");}catch(e){console.warn("Daily reward not claimed",e);}}
   state.data=await call("bootstrap");
-  if(claim&&!state.data.disabled){try{const r=await call("daily");const item=Array.isArray(r)?r[0]:r;if(item?.reward>0)toast("🎁 پاداش ورود امروز: "+num(item.reward)+" سکه");state.data=await call("bootstrap");}catch(e){console.warn(e);}}
   render();
  }catch(e){setPage('<div class="surface"><h2>خطا در اتصال به حساب</h2><p>'+esc(e.message)+'</p><button class="button" data-action="refresh">تلاش دوباره</button></div>');}
 }
@@ -226,7 +233,7 @@ function renderAdmin(){
   const noDates=!d||(!d.valid_from&&!d.valid_until);
   const dateField=(field,label,value,timeName,timeValue)=>
    '<div class="field calendar-field"><label for="discount-'+field+'">'+label+'</label><div class="calendar-input-row"><input id="discount-'+field+'" name="'+field+'" value="'+esc(value)+'" placeholder="انتخاب از تقویم شمسی" readonly data-action="calendar-open" data-field="'+field+'"><button type="button" class="ghost calendar-open" data-action="calendar-open" data-field="'+field+'" aria-label="باز کردن تقویم '+label+'">📅 تقویم</button></div><div class="jalali-popup" data-calendar-for="'+field+'" role="dialog" aria-label="تقویم '+label+'" hidden></div></div><div class="field"><label for="discount-'+timeName+'">ساعت '+label+'</label><input id="discount-'+timeName+'" type="time" name="'+timeName+'" value="'+esc(timeValue)+'" required></div>';
-  body='<div class="two-col"><section class="surface"><h3>'+(d?"ویرایش کد تخفیف":"ثبت کد تخفیف")+'</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" value="'+esc(d?.code||"")+'" '+(d?"readonly":"required")+'></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent" '+(d?.kind==="percent"?"selected":"")+'>درصد</option><option value="rial" '+(d?.kind==="rial"?"selected":"")+'>مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" max="'+(d?.kind==="rial"?"2147483647":"99")+'" value="'+esc(d?.value||"")+'" required><p class="hint" id="discount-value-hint" aria-live="polite">تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ برای کد GALAXY50 مقدار ۵۰ را وارد کنید.</p></div>'+
+  body='<div class="two-col"><section class="surface"><h3>'+(d?"ویرایش کد تخفیف":"ثبت کد تخفیف")+'</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" value="'+esc(d?.code||"")+'" '+(d?"readonly":"required")+'></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent" '+(d?.kind==="percent"?"selected":"")+'>درصد</option><option value="rial" '+(d?.kind==="rial"?"selected":"")+'>مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" max="'+(d?.kind==="rial"?"2147483647":"100")+'" value="'+esc(d?.value||"")+'" required><p class="hint" id="discount-value-hint" aria-live="polite">تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ برای کد GALAXY50 مقدار ۵۰ را وارد کنید.</p></div>'+
    '<div class="field"><label><input type="checkbox" name="date_unlimited" '+(noDates?"checked":"")+'> بدون محدودیت زمانی (تاریخ نامحدود)</label></div><div class="formgrid">'+
    dateField("valid_from","شروع اعتبار",start.date,"start_time",start.time||"00:00")+
    dateField("valid_until","پایان اعتبار",end.date,"end_time",end.time||"23:59")+
@@ -247,6 +254,7 @@ async function startLevel(stage){
   const run=await call("start",{stage});state.gameRun=run;state.gameStage=stage;state.view="game";
   chrome();
   setPage('<div class="game-wrap"><div class="game-head"><div><span class="eyebrow">SPACE BATTLE</span><h2>نبرد مرحله '+num(stage)+'</h2></div><div class="game-metrics"><span class="metric" id="hearts">❤️❤️❤️❤️❤️</span><span class="metric" id="kills">دشمن: ۰ / '+num(run.enemies)+'</span><button class="ghost small" data-action="leave-game">خروج از نبرد</button></div></div><canvas id="battle" width="900" height="540" aria-label="زمین نبرد"></canvas><p class="game-instructions">🕹 با موس، لمس صفحه یا کلیدهای جهت‌نما و WASD حرکت کن. شلیک خودکار است. با P بازی را متوقف کن. رادار بالا-چپ در نمای روی صفحه انگلیسی سمت راست قرار دارد.</p></div>');
+  const {startShooter}=await import("./game.js");
   state.gameStop=startShooter($("#battle"),{stage,count:run.enemies,onProgress:o=>{$("#hearts").textContent="❤️".repeat(o.hearts)+"🖤".repeat(5-o.hearts);$("#kills").textContent="دشمن: "+num(o.kills)+" / "+num(run.enemies);},onEnd:async result=>{
    state.gameStop=null;
    setPage('<div class="loading"><div class="orbit"></div><h2>در حال ثبت نتیجه نبرد…</h2></div>');
@@ -259,8 +267,9 @@ async function startLevel(stage){
  }catch(e){toast(e.message,true);}
 }
 async function mutate(action,payload,success="ثبت شد"){
- const r=await call(action,payload);toast(success);await refresh(false);
- if(state.adminData){state.adminData=await call("adminData");render();}
+ const r=await call(action,payload);toast(success);
+ if(state.adminData&&state.view==="admin"){state.adminData=await call("adminData");renderAdmin();}
+ else await refresh(false);
  return r;
 }
 document.addEventListener("click",async e=>{
@@ -337,7 +346,7 @@ document.addEventListener("submit",async e=>{
   if(id==="admin-coins"){await mutate("adminCoins",{id:b.id,delta:Number(b.delta)});}
   if(id==="admin-package"){await mutate("adminPackage",{...b,coins:Number(b.coins),active:!!form.elements.namedItem("active").checked});state.editingPackage=null;renderAdmin();}
   if(id==="admin-discount"){
-   if(b.kind==="percent"&&Number(b.value)>99)throw Error("درصد تخفیف حداکثر ۹۹ است؛ برای GALAXY50 عدد ۵۰ را وارد کنید.");
+   if(b.kind==="percent"&&Number(b.value)>100)throw Error("درصد تخفیف حداکثر ۱۰۰ است.");
    const date_unlimited=form.elements.namedItem("date_unlimited").checked;
    const from=date_unlimited?null:jalaliToISO(b.valid_from,b.start_time);
    const until=date_unlimited?null:jalaliToISO(b.valid_until,b.end_time,true);
