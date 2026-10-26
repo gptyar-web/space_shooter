@@ -30,6 +30,16 @@ function syncDiscountDateFields(form){
  }
  if(isUnlimited)closeDiscountCalendars();
 }
+function syncDiscountValueField(form){
+ const kind=form?.elements.namedItem("kind")?.value;
+ const value=form?.elements.namedItem("value");
+ if(!value)return;
+ value.max=kind==="percent"?"99":"2147483647";
+ const label=form.querySelector("#discount-value-hint");
+ if(label)label.textContent=kind==="percent"
+  ?"تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ برای کد GALAXY50 مقدار ۵۰ را وارد کنید."
+  :"مبلغ ثابت تخفیف را به ریال وارد کنید.";
+}
 function discountCalendarMarkup(pop){
  const year=Number(pop.dataset.year),month=Number(pop.dataset.month),field=pop.dataset.calendarFor;
  const selected=parseJalaliDate(document.querySelector('#admin-discount [name="'+field+'"]').value);
@@ -216,7 +226,7 @@ function renderAdmin(){
   const noDates=!d||(!d.valid_from&&!d.valid_until);
   const dateField=(field,label,value,timeName,timeValue)=>
    '<div class="field calendar-field"><label for="discount-'+field+'">'+label+'</label><div class="calendar-input-row"><input id="discount-'+field+'" name="'+field+'" value="'+esc(value)+'" placeholder="انتخاب از تقویم شمسی" readonly data-action="calendar-open" data-field="'+field+'"><button type="button" class="ghost calendar-open" data-action="calendar-open" data-field="'+field+'" aria-label="باز کردن تقویم '+label+'">📅 تقویم</button></div><div class="jalali-popup" data-calendar-for="'+field+'" role="dialog" aria-label="تقویم '+label+'" hidden></div></div><div class="field"><label for="discount-'+timeName+'">ساعت '+label+'</label><input id="discount-'+timeName+'" type="time" name="'+timeName+'" value="'+esc(timeValue)+'" required></div>';
-  body='<div class="two-col"><section class="surface"><h3>'+(d?"ویرایش کد تخفیف":"ثبت کد تخفیف")+'</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" value="'+esc(d?.code||"")+'" '+(d?"readonly":"required")+'></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent" '+(d?.kind==="percent"?"selected":"")+'>درصد</option><option value="rial" '+(d?.kind==="rial"?"selected":"")+'>مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" value="'+esc(d?.value||"")+'" required></div>'+
+  body='<div class="two-col"><section class="surface"><h3>'+(d?"ویرایش کد تخفیف":"ثبت کد تخفیف")+'</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" value="'+esc(d?.code||"")+'" '+(d?"readonly":"required")+'></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent" '+(d?.kind==="percent"?"selected":"")+'>درصد</option><option value="rial" '+(d?.kind==="rial"?"selected":"")+'>مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" max="'+(d?.kind==="rial"?"2147483647":"99")+'" value="'+esc(d?.value||"")+'" required><p class="hint" id="discount-value-hint" aria-live="polite">تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ برای کد GALAXY50 مقدار ۵۰ را وارد کنید.</p></div>'+
    '<div class="field"><label><input type="checkbox" name="date_unlimited" '+(noDates?"checked":"")+'> بدون محدودیت زمانی (تاریخ نامحدود)</label></div><div class="formgrid">'+
    dateField("valid_from","شروع اعتبار",start.date,"start_time",start.time||"00:00")+
    dateField("valid_until","پایان اعتبار",end.date,"end_time",end.time||"23:59")+
@@ -230,7 +240,7 @@ function renderAdmin(){
  if(t==="orders")body='<div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>کاربر</th><th>زمان</th><th>تعداد</th><th>مبلغ ریال</th><th>وضعیت</th></tr></thead><tbody>'+a.orders.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+'</td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.coins)+'</td><td>'+num(x.amount_rial)+'</td><td>'+esc(x.status==="pending"?(x.precheckout_tx?"در صف استعلام دوره‌ای":(Date.now()-Date.parse(x.created_at)>86400000?"⚠️ معلق بیش از ۲۴ ساعت؛ بررسی دستی":"در انتظار شروع پرداخت")):x.status)+'</td></tr>').join("")+'</tbody></table></div>';
  if(t==="settings")body='<section class="surface"><h3>تنظیمات بازو و قیمت سکه</h3><p>توکن‌ها فقط برای سرور ارسال می‌شوند و به مرورگر کاربران برنمی‌گردند. در کادر توکن خالی بگذارید تا مقدار قبلی حفظ شود.</p><form id="admin-settings"><div class="formgrid"><div class="field"><label>قیمت هر سکه (ریال؛ صفر یعنی فروش متوقف)</label><input name="price_rial_per_coin" type="number" min="0" value="'+esc(a.settings.price_rial_per_coin)+'" required></div><div class="field"><label>لینک رسمی بازوی بله (https://ble.ir/...)</label><input name="bale_url" type="url" value="'+esc(a.settings.bale_url)+'"></div><div class="field"><label>توکن بازوی بله '+(a.tokens.includes("bot_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="bot_token" type="password" autocomplete="off"></div><div class="field"><label>توکن کیف پول بله '+(a.tokens.includes("provider_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="provider_token" type="password" autocomplete="off"></div></div><button class="button" type="submit">ذخیره و تنظیم Webhook</button></form><p class="hint">قبل از تنظیم توکن، هر دو تابع Edge باید منتشر شده باشند.</p></section>';
  setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body);
- if(t==="discounts")syncDiscountDateFields($("#admin-discount"));
+ if(t==="discounts"){syncDiscountDateFields($("#admin-discount"));syncDiscountValueField($("#admin-discount"));}
 }
 async function startLevel(stage){
  try{
@@ -327,6 +337,7 @@ document.addEventListener("submit",async e=>{
   if(id==="admin-coins"){await mutate("adminCoins",{id:b.id,delta:Number(b.delta)});}
   if(id==="admin-package"){await mutate("adminPackage",{...b,coins:Number(b.coins),active:!!form.elements.namedItem("active").checked});state.editingPackage=null;renderAdmin();}
   if(id==="admin-discount"){
+   if(b.kind==="percent"&&Number(b.value)>99)throw Error("درصد تخفیف حداکثر ۹۹ است؛ برای GALAXY50 عدد ۵۰ را وارد کنید.");
    const date_unlimited=form.elements.namedItem("date_unlimited").checked;
    const from=date_unlimited?null:jalaliToISO(b.valid_from,b.start_time);
    const until=date_unlimited?null:jalaliToISO(b.valid_until,b.end_time,true);
@@ -339,7 +350,7 @@ document.addEventListener("submit",async e=>{
  }catch(err){toast(err.message,true);}
  finally{if(button&&button.isConnected)button.disabled=false;}
 });
-document.addEventListener("change",e=>{if(e.target.matches("#admin-discount [name=date_unlimited]"))syncDiscountDateFields(e.target.form);});
+document.addEventListener("change",e=>{if(e.target.matches("#admin-discount [name=date_unlimited]"))syncDiscountDateFields(e.target.form);if(e.target.matches("#admin-discount [name=kind]"))syncDiscountValueField(e.target.form);});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDiscountCalendars();});
 init().catch(error => {
  console.error("Space Shooter startup error",error);
