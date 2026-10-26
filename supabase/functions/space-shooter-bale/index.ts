@@ -24,8 +24,18 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
  const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});if(error){await say(chat,"کد تخفیف یا سفارش معتبر نیست: "+error.message+"\nکد صحیح بفرستید یا «ندارم» بنویسید.");return;}
  const order=Array.isArray(data)?data[0]:data;
  if(!order)throw Error("Order not created");
- await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
- description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+ try{
+  await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
+  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+ }catch(error){
+  // The payment provider did not confirm invoice delivery. Disable this invoice
+  // and restore its reserved discount quota in the same DB transaction.
+  const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
+  if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
+  console.error("SpaceShooter invoice delivery failed",error instanceof Error?error.message:error);
+  await say(chat,"ارسال صورتحساب ناموفق بود و سفارش لغو شد. هیچ سکه‌ای برداشت نشده است؛ برای تلاش مجدد کد تخفیف یا «ندارم» را دوباره بفرستید.");
+  return;
+ }
  await saveSession(chat,{state:"invoice",coupon});
  await say(chat,"صورتحساب ارسال شد. بعد از پرداخت موفق و تأیید تراکنش، سکه به‌صورت خودکار شارژ می‌شود.");
 }
