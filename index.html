@@ -27,5 +27,18 @@
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="./app.js"></script>
+  <script>
+    (() => {
+      const app = document.getElementById("app");
+      const startupMessage = "در بارگذاری برنامه مشکلی پیش آمد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
+      function showStartupFailure() {
+        if (!app?.querySelector(".loading h2")?.textContent?.includes("در حال آماده‌سازی کهکشان")) return;
+        app.innerHTML = '<section class="surface" style="max-width:650px;margin:45px auto;text-align:center"><h2>⚠️ بارگذاری برنامه ناموفق بود</h2><p>' + startupMessage + '</p><button type="button" class="button" id="retry-startup">تلاش دوباره</button></section>';
+        document.getElementById("retry-startup")?.addEventListener("click", () => location.reload());
+      }
+      document.querySelector('script[type="module"]')?.addEventListener("error", showStartupFailure, {once:true});
+      setTimeout(showStartupFailure, 15000);
+    })();
+  </script>
 </body>
 </html>
