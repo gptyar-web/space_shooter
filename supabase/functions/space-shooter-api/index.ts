@@ -5,7 +5,7 @@ const db = createClient(URL, KEY, {auth:{persistSession:false,autoRefreshToken:f
 const ORIGINS = ["https://gptyar-web.github.io","http://localhost:5173","http://127.0.0.1:5173"];
 function headers(req:Request) { const origin=req.headers.get("origin")||"";return {"Access-Control-Allow-Origin":ORIGINS.includes(origin)?origin:"https://gptyar-web.github.io","Access-Control-Allow-Headers":"authorization,apikey,content-type,x-client-info","Access-Control-Allow-Methods":"POST,OPTIONS","Vary":"Origin","Content-Type":"application/json"}; }
 function json(req:Request,data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:headers(req)});}
-function requireOk<T>(result:{data:T,error:any}):T{if(result.error)throw new Error(result.error.message);return result.data;}
+function requireOk<T>(result:{data:T|null,error:any}):T{if(result.error)throw new Error(result.error.message);if(result.data===null)throw new Error("اطلاعات موردنیاز یافت نشد.");return result.data;}
 function fail(message:string):never {throw new Error(message);}
 function emailFor(name:string){return "ss-"+name+"@spaceshooter.invalid";}
 function onlyString(x:unknown,max=3000){return typeof x==="string"?x.trim().slice(0,max):"";}
