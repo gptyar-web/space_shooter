@@ -188,7 +188,15 @@ async function adminAction(p:any,b:any){
   if(tab==="tickets"||tab==="orders"){
    add("users",db.from("ss_profiles").select("id,username").limit(500));
    if(tab==="tickets")add("tickets",pageQuery(db.from("ss_tickets").select("*").order("updated_at",{ascending:false})),true);
-   else add("orders",pageQuery(db.from("ss_orders").select("*").order("created_at",{ascending:false})),true);
+   else {
+    const archived=b.archived===true;
+    const query=db.from("ss_orders").select("*");
+    if(archived){
+     add("orders",pageQuery(query.not("archived_at","is",null).order("archived_at",{ascending:false})),true);
+    }else{
+     add("orders",pageQuery(query.is("archived_at",null).order("created_at",{ascending:false})),true);
+    }
+   }
   }
   if(tab==="settings"){
    add("settings",db.from("ss_settings").select("*").eq("id",true).single());
@@ -266,6 +274,16 @@ async function adminAction(p:any,b:any){
    return row;
   }
   return requireOk(await db.from("ss_discounts").insert({code,...item}).select().single());
+ }
+ case "adminArchiveOrder":{
+  const id=String(b.id||"");
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+   ||typeof b.archived!=="boolean")fail("درخواست بایگانی سفارش نامعتبر است.");
+  const reason=onlyString(b.reason,300);
+  const changed=requireOk(await db.rpc("ss_admin_archive_order",{
+   p_admin:p.id,p_order:id,p_archive:b.archived,p_reason:reason
+  }));
+  return {changed,archived:b.archived};
  }
  case "adminTicket":{
   const updates:any={updated_at:new Date().toISOString()};
