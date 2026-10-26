@@ -21,7 +21,8 @@ jobs:
       - name: Prepare static website
         run: |
           mkdir -p _site
-          cp index.html app.js game.js style.css _site/
+          cp index.html ./*.js style.css _site/
+          node --test tests/site-deployment.test.mjs
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
