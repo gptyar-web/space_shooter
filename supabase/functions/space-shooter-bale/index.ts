@@ -133,7 +133,7 @@ async function reconcileOrders(){
   .or("last_reconciled_at.is.null,last_reconciled_at.lt."+cutoff)
   .order("last_reconciled_at",{ascending:true,nullsFirst:true}).limit(25));
  let checked=0,paid=0,failed=0,errors=0;
- for(const order of rows){
+ for(const order of rows||[]){
   checked++;
   const update=await db.from("ss_orders").update({last_reconciled_at:new Date().toISOString(),
    reconciliation_attempts:order.reconciliation_attempts+1}).eq("id",order.id).eq("status","pending");
