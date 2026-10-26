@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync,existsSync} from "node:fs";
-import {resolve,join,relative,sep} from "node:path";
+import {resolve,join,dirname,sep} from "node:path";
 
 const root=resolve(process.cwd(),"_site");
 function required(path){
@@ -26,7 +26,7 @@ test("published HTML and recursive JavaScript imports exist in deployment artifa
   if(!path.endsWith(".js"))continue;
   for(const m of source.matchAll(/\bfrom\s*["'](\.\/[^"']+\.js)["']|\bimport\s*["'](\.\/[^"']+\.js)["']/g)){
    const child=m[1]||m[2];
-   stack.push(join(resolve(path,".."),child));
+   stack.push(join(dirname(path),child));
   }
  }
  assert.ok(visited.has("jalali-calendar.js"),"Jalali calendar dependency must be deployed");
