@@ -214,13 +214,30 @@ async function adminAction(p:any,b:any){
  }
  case "adminDiscount":{
   const code=onlyString(b.code,32).toUpperCase(),kind=b.kind,value=Number(b.value);
-  if(!/^[A-Z0-9_-]{3,32}$/.test(code)||!["percent","rial"].includes(kind)||!Number.isSafeInteger(value)||value<1||(kind==="percent"&&value>99))fail("کد تخفیف نامعتبر است.");
+  if(!/^[A-Z0-9_-]{3,32}$/.test(code)||!["percent","rial"].includes(kind)
+   ||!Number.isSafeInteger(value)||value<1||value>2147483647||(kind==="percent"&&value>99))fail("کد تخفیف نامعتبر است.");
+  const unlimited=b.unlimited===true,dateUnlimited=b.date_unlimited===true;
+  const maxUses=unlimited?null:Number(b.max_uses);
+  if(!unlimited&&(!Number.isSafeInteger(maxUses)||maxUses<1||maxUses>2147483647))fail("سقف استفاده باید یک عدد مثبت باشد.");
+  const parseISO=(input:unknown)=>{
+   if(typeof input!=="string"||!(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/).test(input)||!Number.isFinite(Date.parse(input)))fail("تاریخ اعتبار نامعتبر است.");
+   return new Date(input).toISOString();
+  };
+  const fromDate=dateUnlimited?null:parseISO(b.valid_from);
+  const untilDate=dateUnlimited?null:parseISO(b.valid_until);
+  if(!dateUnlimited&&Date.parse(fromDate!)>=Date.parse(untilDate!))fail("پایان اعتبار باید بعد از شروع اعتبار باشد.");
   const previous=requireOk(await db.from("ss_discounts").select("used_count").eq("code",code).maybeSingle());
-  const item={code,kind,value,used_count:previous?.used_count||0,active:b.active!==false,unlimited:b.unlimited===true,
-   max_uses:b.unlimited===true?null:Number(b.max_uses||1),
-   valid_from:b.valid_from?new Date(b.valid_from).toISOString():null,
-   valid_until:b.valid_until?new Date(b.valid_until).toISOString():null};
-  return requireOk(await db.from("ss_discounts").upsert(item).select().single());
+  if(!unlimited&&previous&&maxUses!<previous.used_count)fail("سقف استفاده نباید کمتر از تعداد استفاده‌های ثبت‌شده باشد.");
+  const item={kind,value,active:b.active!==false,unlimited,max_uses:maxUses,valid_from:fromDate,valid_until:untilDate};
+  if(previous){
+   let query=db.from("ss_discounts").update(item).eq("code",code);
+   // Avoid lowering the limit below concurrent coupon reservations.
+   if(!unlimited)query=query.lte("used_count",maxUses!);
+   const row=requireOk(await query.select().maybeSingle());
+   if(!row)fail("سقف استفاده در اثر سفارش هم‌زمان تغییر کرد. دوباره تلاش کنید.");
+   return row;
+  }
+  return requireOk(await db.from("ss_discounts").insert({code,...item}).select().single());
  }
  case "adminTicket":{
   const updates:any={updated_at:new Date().toISOString()};
