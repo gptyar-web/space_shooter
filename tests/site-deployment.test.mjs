@@ -15,7 +15,7 @@ function required(path){
 
 test("published HTML and recursive JavaScript imports exist in deployment artifact",()=>{
  const html=required("index.html");
- const initial=[...html.matchAll(/(?:src|href)=["'](\.\/[^"']+\.(?:js|css))["']/g)].map(x=>x[1]);
+ const initial=[...html.matchAll(/(?:src|href)=["'](\.\/[^"'?]+\.(?:js|css))(?:\?[^"']*)?["']/g)].map(x=>x[1]);
  assert.ok(initial.includes("./app.js"),"Main module must be shipped");
  const stack=initial.map(s=>s.slice(2)),visited=new Set();
  while(stack.length){
@@ -30,4 +30,16 @@ test("published HTML and recursive JavaScript imports exist in deployment artifa
   }
  }
  assert.ok(visited.has("jalali-calendar.js"),"Jalali calendar dependency must be deployed");
+});
+
+
+test("deployed header, footer and version manifest agree",()=>{
+ const html=required("index.html");
+ const release=JSON.parse(required("version.json"));
+ assert.match(release.version,/^\d+\.\d+\.\d+$/);
+ const fa=release.version.replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+ assert.ok(html.includes("ورژن: "+fa),"Footer version must match the release manifest");
+ assert.ok(html.includes("نسخه "+fa),"Header version must match the release manifest");
+ assert.ok(html.includes("./app.js?v="+release.version),"App JS must carry the current cache-busting version");
+ assert.ok(html.includes("./theme-v5.css?v="+release.version),"Theme stylesheet must carry the current version");
 });

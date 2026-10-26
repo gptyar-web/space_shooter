@@ -5,8 +5,8 @@
   <meta name="theme-color" content="#070c18">
   <title>Space Shooter | نبرد کهکشانی</title>
   <meta name="description" content="بازی اسپیس شوتر با ۲۰ فصل، ۲۰۰ مرحله، فروشگاه و خرید سکه از بله">
-  <link rel="stylesheet" href="./style.css">
-  <link rel="stylesheet" href="./theme-v5.css">
+  <link rel="stylesheet" href="./style.css?v=5.4.4">
+  <link rel="stylesheet" href="./theme-v5.css?v=5.4.4">
 </head>
 <body>
   <div class="nebula" aria-hidden="true"></div>
@@ -14,6 +14,7 @@
     <header id="topbar">
       <a class="brand" href="#home" id="brand"><span class="brand-icon">✦</span><span>SPACE <strong>SHOOTER</strong><small>نبرد کهکشانی</small></span></a>
       <div class="header-right">
+        <span class="release-version" id="release-version" aria-label="نسخه کنونی برنامه">نسخه ۵.۴.۴</span>
         <div class="coinbox" id="coinbox" hidden><span>🪙</span><b id="coinbalance">۰</b><button class="plus" id="coinplus" aria-label="افزایش موجودی">+</button></div>
         <span id="player-name" class="player-name"></span>
         <button class="ghost small" id="logout-btn" hidden>خروج</button>
@@ -24,10 +25,10 @@
     <main id="app" tabindex="-1">
       <section class="loading"><div class="orbit"></div><h2>در حال آماده‌سازی کهکشان…</h2></section>
     </main>
-    <footer>ساخته‌شده برای پروژه برنامه‌نویسی کامپیوتر | ارشیا مزدبران | دبیرستان شهید کلاهدوزان ۲ | ورژن: ۵.۴.۲</footer>
+    <footer>ساخته‌شده برای پروژه برنامه‌نویسی کامپیوتر | ارشیا مزدبران | دبیرستان شهید کلاهدوزان ۲ | ورژن: ۵.۴.۴</footer>
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=5.4.4"></script>
   <script>
     (() => {
       const app = document.getElementById("app");
