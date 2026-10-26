@@ -24,8 +24,18 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
  const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});if(error){await say(chat,"کد تخفیف یا سفارش معتبر نیست: "+error.message+"\nکد صحیح بفرستید یا «ندارم» بنویسید.");return;}
  const order=Array.isArray(data)?data[0]:data;
  if(!order)throw Error("Order not created");
- await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
- description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+ try{
+  await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
+  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+ }catch(error){
+  // The payment provider did not confirm invoice delivery. Disable this invoice
+  // and restore its reserved discount quota in the same DB transaction.
+  const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
+  if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
+  console.error("SpaceShooter invoice delivery failed",error instanceof Error?error.message:error);
+  await say(chat,"ارسال صورتحساب ناموفق بود و سفارش لغو شد. هیچ سکه‌ای برداشت نشده است؛ برای تلاش مجدد کد تخفیف یا «ندارم» را دوباره بفرستید.");
+  return;
+ }
  await saveSession(chat,{state:"invoice",coupon});
  await say(chat,"صورتحساب ارسال شد. بعد از پرداخت موفق و تأیید تراکنش، سکه به‌صورت خودکار شارژ می‌شود.");
 }
@@ -83,7 +93,7 @@ async function onPayment(msg:any){
  const id=String(payment?.invoice_payload||""), tx=String(payment?.telegram_payment_charge_id||"");
  const order=(await db.from("ss_orders").select("*").eq("id",id).maybeSingle()).data;
  if(!order||order.bale_chat_id!==chat||payment.currency!=="IRR"||Number(payment.total_amount)!==order.amount_rial||!tx)throw Error("Unmatched payment");
- if(order.status==="paid")return; // Avoid duplicate confirmations on webhook retry.
+ if(order.status==="paid"){if(order.provider_tx!==tx)throw Error("Transaction ID mismatch on previously settled order");return;} // Idempotent webhook retry.
  const result=await bale("inquireTransaction",{transaction_id:tx});
  if(result.status!=="paid"||String(result.id)!==tx||Number(result.amount)!==order.amount_rial||Number(result.userID)!==Number(msg.from?.id))throw Error("Payment not yet verified");
  must(await db.rpc("ss_settle_order",{p_order:order.id,p_transaction:tx,p_amount:order.amount_rial}));

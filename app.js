@@ -134,7 +134,7 @@ function reason(key){return ({daily:"پاداش روزانه",first_clear:"او�
 function renderOrders(){
  const rows=state.data.orders||[];
  setPage('<div class="section-head"><div><div class="eyebrow">PAYMENT RECORDS</div><h2>🧾 واریزی‌ها برای خرید سکه</h2><p>آخرین سفارش‌های پرداخت در بله</p></div></div><div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>تاریخ</th><th>مبلغ (ریال)</th><th>تعداد سکه</th><th>وضعیت</th></tr></thead><tbody>'+
- (rows.length?rows.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.amount_rial)+'</td><td>'+num(x.coins)+'</td><td><span class="tag '+(x.status==="paid"?"paid":"pending")+'">'+(x.status==="paid"?"واریز شده":"عدم خریداری")+'</span></td></tr>').join(""):'<tr><td colspan="5" class="empty">سفارشی ثبت نشده است.</td></tr>')+'</tbody></table></div>');
+ (rows.length?rows.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.amount_rial)+'</td><td>'+num(x.coins)+'</td><td><span class="tag '+(x.status==="paid"?"paid":"pending")+'">'+(x.status==="paid"?"واریز شده":x.status==="failed"?"عدم خریداری":"در انتظار پرداخت")+'</span></td></tr>').join(""):'<tr><td colspan="5" class="empty">سفارشی ثبت نشده است.</td></tr>')+'</tbody></table></div>');
 }
 function renderSupport(){
  const tickets=state.data.tickets||[];
