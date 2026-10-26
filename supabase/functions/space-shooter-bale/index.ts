@@ -5,9 +5,10 @@ const db=createClient(PROJECT_URL,KEY,{auth:{persistSession:false,autoRefreshTok
 function must<T>(x:{data:T,error:any}):T{if(x.error)throw Error(x.error.message);return x.data;}
 async function secret(name:string){return (await db.from("ss_private_config").select("secret").eq("name",name).maybeSingle()).data?.secret||"";}
 let token="";
+class BaleResponseError extends Error{}
 async function bale(method:string,parameters:Record<string,unknown>){
  const res=await fetch("https://tapi.bale.ai/bot"+token+"/"+method,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(parameters)});
- const j=await res.json();if(!j.ok)throw Error("Bale "+method+": "+String(j.description||"failed"));return j.result;
+ const j=await res.json();if(!j.ok)throw new BaleResponseError("Bale "+method+": "+String(j.description||"failed"));return j.result;
 }
 async function say(chat_id:number,text:string,extra:Record<string,unknown>={}){return bale("sendMessage",{chat_id,text,...extra});}
 const contactKeyboard={keyboard:[[{text:"📱 ارسال شماره موبایل من",request_contact:true}]],resize_keyboard:true,one_time_keyboard:true};
@@ -26,14 +27,18 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
  if(!order)throw Error("Order not created");
  try{
   await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
-  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
+  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,currency:"IRR",prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
  }catch(error){
-  // The payment provider did not confirm invoice delivery. Disable this invoice
-  // and restore its reserved discount quota in the same DB transaction.
-  const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
-  if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
+  // Only a definitive Bale API rejection allows refunding the reserved coupon.
+  // A timeout may mean the invoice was delivered; keep it pending for review.
   console.error("SpaceShooter invoice delivery failed",error instanceof Error?error.message:error);
-  await say(chat,"ارسال صورتحساب ناموفق بود و سفارش لغو شد. هیچ سکه‌ای برداشت نشده است؛ برای تلاش مجدد کد تخفیف یا «ندارم» را دوباره بفرستید.");
+  if(error instanceof BaleResponseError){
+   const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
+   if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
+   await say(chat,"صدور صورتحساب از سوی بله رد شد؛ سفارش لغو شد. دوباره تلاش کنید.");
+  }else{
+   await say(chat,"وضعیت ارسال صورتحساب مشخص نیست؛ برای جلوگیری از شارژ تکراری سفارش محفوظ مانده است. لطفاً وضعیت را از پشتیبانی پیگیری کنید.");
+  }
   return;
  }
  await saveSession(chat,{state:"invoice",coupon});
@@ -58,9 +63,8 @@ async function onMessage(msg:any){
  }
  if(s.state==="need_link"){
   const code=text.replaceAll(" ","").toUpperCase();
-  const link=(await db.from("ss_link_codes").select("*").eq("code",code).eq("user_id",s.user_id).is("consumed_at",null).gt("expires_at",new Date().toISOString()).maybeSingle()).data;
-  if(!link){await say(chat,"کد اتصال نامعتبر یا منقضی شده است. کد جدید از حساب بازی بگیرید.");return;}
-  must(await db.from("ss_link_codes").update({consumed_at:new Date().toISOString()}).eq("code",code).is("consumed_at",null));
+  const linked=must(await db.rpc("ss_confirm_bale_link",{p_user:s.user_id,p_code:code,p_bale:sender}));
+  if(!linked){await say(chat,"کد اتصال نامعتبر یا منقضی شده است. کد جدید از حساب بازی بگیرید.");return;}
   const p=must(await db.from("ss_profiles").select("first_name,last_name").eq("id",s.user_id).single());
    if(!p)throw Error("Linked account not found");
   await saveSession(chat,{state:"need_coins"});
@@ -84,24 +88,83 @@ async function onMessage(msg:any){
 }
 async function onPrecheckout(q:any){
  const order=(await db.from("ss_orders").select("*").eq("id",String(q.invoice_payload||"")).maybeSingle()).data;
- const profile=order?(await db.from("ss_profiles").select("active").eq("id",order.user_id).maybeSingle()).data:null;
- const good=!!order&&profile?.active===true&&order.status==="pending"&&order.amount_rial===Number(q.total_amount)&&q.currency==="IRR"&&order.bale_chat_id===Number(q.from?.id);
- return bale("answerPreCheckoutQuery",{pre_checkout_query_id:q.id,ok:good,...(good?{}:{error_message:"مبلغ یا سفارش تأیید نشد."})});
+ const profile=order?(await db.from("ss_profiles").select("active,bale_verified_at,bale_user_id").eq("id",order.user_id).maybeSingle()).data:null;
+ const payer=Number(q.from?.id),total=Number(q.total_amount);
+ let good=!!order&&profile?.active===true&&!!profile?.bale_verified_at
+  &&profile.bale_user_id===payer&&order.status==="pending"
+  &&order.amount_rial===total&&q.currency==="IRR"&&order.bale_chat_id===payer;
+ if(good){
+  const saved=await db.rpc("ss_record_checkout",{p_order:order.id,p_transaction:String(q.id||""),p_amount:total,p_payer:payer,p_notice:false});
+  good=!saved.error&&saved.data===true;
+ }
+ return bale("answerPreCheckoutQuery",{pre_checkout_query_id:q.id,ok:good,...(good?{}:{error_message:"مبلغ یا حساب سفارش تأیید نشد."})});
+}
+function verifiedTransaction(t:any,tx:string,order:any,payer:number){
+ return !!t&&t.status==="paid"&&String(t.id)===tx
+  &&Number(t.amount)===Number(order.amount_rial)&&Number(t.userID)===payer;
 }
 async function onPayment(msg:any){
- const payment=msg.successful_payment,chat=Number(msg.chat?.id);
- const id=String(payment?.invoice_payload||""), tx=String(payment?.telegram_payment_charge_id||"");
+ const payment=msg.successful_payment,chat=Number(msg.chat?.id),payer=Number(msg.from?.id);
+ const id=String(payment?.invoice_payload||""),tx=String(payment?.telegram_payment_charge_id||"");
  const order=(await db.from("ss_orders").select("*").eq("id",id).maybeSingle()).data;
- if(!order||order.bale_chat_id!==chat||payment.currency!=="IRR"||Number(payment.total_amount)!==order.amount_rial||!tx)throw Error("Unmatched payment");
- if(order.status==="paid"){if(order.provider_tx!==tx)throw Error("Transaction ID mismatch on previously settled order");return;} // Idempotent webhook retry.
+ if(!order||order.bale_chat_id!==chat||chat!==payer||payment.currency!=="IRR"
+ ||Number(payment.total_amount)!==Number(order.amount_rial)||tx.length<3)throw Error("Unmatched payment");
+ if(order.status==="paid"){
+  if(order.provider_tx!==tx)throw Error("Transaction ID mismatch");
+  return;
+ }
+ const recorded=must(await db.rpc("ss_record_checkout",{p_order:order.id,p_transaction:tx,
+   p_amount:order.amount_rial,p_payer:payer,p_notice:true}));
+ if(!recorded)throw Error("Payment notice inconsistent with order");
  const result=await bale("inquireTransaction",{transaction_id:tx});
- if(result.status!=="paid"||String(result.id)!==tx||Number(result.amount)!==order.amount_rial||Number(result.userID)!==Number(msg.from?.id))throw Error("Payment not yet verified");
+ if(!verifiedTransaction(result,tx,order,payer))throw Error("Payment not yet verified");
  must(await db.rpc("ss_settle_order",{p_order:order.id,p_transaction:tx,p_amount:order.amount_rial}));
  await saveSession(chat,{state:"need_coins",coins:null,coupon:null});
- await say(chat,"پرداخت با موفقیت استعلام شد ✅ "+order.coins+" سکه به موجودی شما افزوده شد.\nشماره سفارش: "+order.id+"\nبرای خرید دوباره تعداد سکه را بفرستید.");
+ try{await say(chat,"پرداخت تأیید شد ✅ "+order.coins+" سکه شارژ شد.\nشماره سفارش: "+order.id+"\nبرای خرید دوباره تعداد سکه را بفرستید.");}
+ catch(e){console.error("Payment settled but notification failed",e);}
+}
+// Invoked periodically by a private Vault-backed pg_cron request. Never infer
+// "paid" from a pending invoice or a webhook alone.
+async function reconcileOrders(){
+ const cutoff=new Date(Date.now()-5*60000).toISOString();
+ const rows=must(await db.from("ss_orders")
+  .select("id,precheckout_tx,precheckout_payer,bale_chat_id,amount_rial,coins,reconciliation_attempts,last_reconciled_at,payment_noticed_at")
+  .eq("status","pending").not("precheckout_tx","is",null)
+  .or("last_reconciled_at.is.null,last_reconciled_at.lt."+cutoff)
+  .order("last_reconciled_at",{ascending:true,nullsFirst:true}).limit(25));
+ let checked=0,paid=0,failed=0,errors=0;
+ for(const order of rows||[]){
+  checked++;
+  const update=await db.from("ss_orders").update({last_reconciled_at:new Date().toISOString(),
+   reconciliation_attempts:order.reconciliation_attempts+1}).eq("id",order.id).eq("status","pending");
+  if(update.error){errors++;continue;}
+  try{
+   const info=await bale("inquireTransaction",{transaction_id:order.precheckout_tx});
+   if(verifiedTransaction(info,order.precheckout_tx,order,Number(order.precheckout_payer))){
+    must(await db.rpc("ss_settle_order",{p_order:order.id,p_transaction:order.precheckout_tx,p_amount:order.amount_rial}));
+    paid++;
+    try{await say(Number(order.bale_chat_id),"پرداخت شما تأیید و "+order.coins+" سکه واریز شد ✅\nشماره سفارش: "+order.id);}catch(e){console.warn("Bale notification failed",e);}
+   }else if(["failed","rejected"].includes(String(info?.status))
+    &&String(info?.id)===String(order.precheckout_tx)
+    &&Number(info?.amount)===Number(order.amount_rial)
+    &&Number(info?.userID)===Number(order.precheckout_payer)){
+    const closed=must(await db.rpc("ss_close_verified_failed_payment",{p_order:order.id,p_transaction:order.precheckout_tx}));
+    if(closed)failed++;
+   }
+  }catch(e){errors++;console.error("Bale reconciliation needs retry",order.id,e instanceof Error?e.message:e);}
+ }
+ return {checked,paid,failed,errors};
 }
 Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return new Response("Not allowed",{status:405});
+ const mode=new URL(req.url).searchParams.get("mode");
+ if(mode==="reconcile"){
+  const cronSecret=await secret("reconcile_secret");
+  if(!cronSecret||req.headers.get("x-ss-cron-secret")!==cronSecret)return new Response("Forbidden",{status:403});
+  token=await secret("bot_token");if(!token)return new Response("Not configured",{status:503});
+  try{return Response.json({ok:true,data:await reconcileOrders()});}
+  catch(e){console.error("SpaceShooter reconciliation failed",e);return Response.json({ok:false},{status:503});}
+ }
  const given=new URL(req.url).searchParams.get("secret");
  const expected=await secret("webhook_secret");
  if(!expected||!given||given!==expected)return new Response("Forbidden",{status:403});

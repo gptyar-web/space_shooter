@@ -80,13 +80,19 @@ async function userAction(p:any,b:any){
    const prior=requireOk(await db.from("ss_progress").select("best_score,cleared").eq("user_id",p.id).eq("stage",stage-1).maybeSingle());
    if(!prior?.cleared||prior.best_score<75)fail("ابتدا مرحله قبل را با امتیاز ۷۵ یا بیشتر تمام کنید.");
   }
+  const recent=requireOk(await db.from("ss_runs").select("id").eq("user_id",p.id)
+   .is("finished_at",null).gt("started_at",new Date(Date.now()-120000).toISOString()).limit(3));
+  if((recent?.length||0)>=3)fail("تعداد نبردهای هم‌زمان زیاد است؛ کمی بعد دوباره تلاش کنید.");
   const run=requireOk(await db.from("ss_runs").insert({user_id:p.id,stage}).select("id,started_at,stage").single());
   return {...run,enemies:8+Math.min(12,Math.floor(stage/10))};
  }
  case "finish":{
   const kills=Number(b.kills),score=Number(b.score),won=b.won===true;
-  if(!Number.isInteger(kills)||!Number.isInteger(score)||typeof b.run!=="string")fail("نتیجه نامعتبر است.");
-  return requireOk(await db.rpc("ss_finish_run",{p_user:p.id,p_run:b.run,p_kills:kills,p_score:score,p_won:won}));
+  const hearts=Number(b.hearts),elapsed=Number(b.elapsed);
+  if(!Number.isInteger(kills)||!Number.isInteger(score)||!Number.isInteger(hearts)
+   ||!Number.isFinite(elapsed)||typeof b.run!=="string")fail("نتیجه نامعتبر است.");
+  return requireOk(await db.rpc("ss_finish_verified_run",{p_user:p.id,p_run:b.run,p_kills:kills,
+   p_score:score,p_won:won,p_hearts:hearts,p_elapsed:elapsed}));
  }
  case "buy":{
   if(!/^[a-f0-9-]{36}$/i.test(String(b.package_id)))fail("بسته نامعتبر است.");
@@ -185,7 +191,8 @@ async function adminAction(p:any,b:any){
    updates.username=username;
   }
   if(uid===p.id&&updates.active===false)fail("مدیر نمی‌تواند حساب خود را غیرفعال کند.");
-  const old=requireOk(await db.from("ss_profiles").select("username").eq("id",uid).single());
+  const old=requireOk(await db.from("ss_profiles").select("username,phone").eq("id",uid).single());
+  if(updates.phone&&updates.phone!==old?.phone){updates.bale_verified_at=null;updates.bale_user_id=null;}
    if(!old)fail("حساب یافت نشد.");
   const authUpdates:any={};
   if(updates.username&&updates.username!==old.username)authUpdates.email=emailFor(updates.username),authUpdates.email_confirm=true;
