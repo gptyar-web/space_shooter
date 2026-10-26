@@ -26,7 +26,7 @@ export function startShooter(canvas,{stage,count,onProgress,onEnd}){
  function finish(won){
   if(ended)return;ended=true;
   const score=won?Math.max(0,Math.min(100,100-(5-hearts)*9-Math.floor(Math.max(0,elapsed-38)*0.35))):0;
-  destroy();onEnd({won,kills:killed,score,hearts,elapsed:Math.round(elapsed)});
+  destroy();onEnd({won,kills:killed,score,hearts,elapsed:Math.round(elapsed*1000)/1000});
  }
  function drawShip(x,y,r,color,enemy=false){
   ctx.save();ctx.translate(x,y);
