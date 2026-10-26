@@ -229,3 +229,7 @@ code{background:#0a162b;color:#ffe2a9;padding:5px 8px;border-radius:8px;max-widt
 @media(prefers-reduced-motion:reduce){
  *,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
+
+.admin-pagination{display:flex;align-items:center;justify-content:center;gap:17px;margin:20px 0 10px;padding:17px;border:1px solid var(--border);border-radius:14px;background:#0f1b30}
+.admin-pagination span{color:#b7d4de;font-size:12px;font-weight:700}
+.admin-pagination button[disabled]{pointer-events:none;opacity:.42}
