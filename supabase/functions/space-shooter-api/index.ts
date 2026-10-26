@@ -163,21 +163,40 @@ async function adminAction(p:any,b:any){
  if(!await isAdmin(p.id))fail("حساب شما دسترسی مدیریت ندارد.");
  switch(b.action){
  case "adminData":{
-  const [users,wallets,packages,discounts,announcements,tickets,orders,settings,keys]=await Promise.all([
-   db.from("ss_profiles").select("*").order("created_at",{ascending:false}).limit(500),
-   db.from("ss_wallets").select("*").limit(500),
-   db.from("ss_packages").select("*").order("created_at",{ascending:false}).limit(500),
-   db.from("ss_discounts").select("*").limit(500),
-   db.from("ss_announcements").select("*").order("created_at",{ascending:false}).limit(100),
-   db.from("ss_tickets").select("*").order("updated_at",{ascending:false}).limit(500),
-   db.from("ss_orders").select("*").order("created_at",{ascending:false}).limit(200),
-   db.from("ss_settings").select("*").eq("id",true).single(),
-   db.from("ss_private_config").select("name")
-  ]);
-  for(const q of [users,wallets,packages,discounts,announcements,tickets,orders,settings,keys])if(q.error)throw q.error;
-  return {users:users.data,wallets:wallets.data,packages:packages.data,discounts:discounts.data,
-  announcements:announcements.data,tickets:tickets.data,orders:orders.data,settings:settings.data,
-  tokens:keys.data?.map((x:any)=>x.name)||[]};
+  const tab=String(b.tab||"users"),page=Number(b.page||0);
+  if(!["users","packages","discounts","notices","tickets","orders","settings"].includes(tab)
+     ||!Number.isSafeInteger(page)||page<0||page>10000)fail("Invalid admin page");
+  const response:any={users:[],wallets:[],packages:[],discounts:[],announcements:[],
+   tickets:[],orders:[],settings:{},tokens:[],hasMore:false};
+  const jobs:Promise<void>[]=[];
+  const add=(name:string,query:any,paged=false)=>{
+   jobs.push((async()=>{
+    const result=await query;if(result.error)throw result.error;
+    const data=result.data??[];
+    if(paged){response.hasMore=Array.isArray(data)&&data.length>50;response[name]=data.slice(0,50);}
+    else response[name]=data;
+   })());
+  };
+  const pageQuery=(q:any)=>q.range(page*50,page*50+50);
+  if(tab==="users"){
+   add("users",pageQuery(db.from("ss_profiles").select("*").order("created_at",{ascending:false})),true);
+   add("wallets",db.from("ss_wallets").select("*").limit(500));
+  }
+  if(tab==="packages")add("packages",db.from("ss_packages").select("*").order("created_at",{ascending:false}).limit(250));
+  if(tab==="discounts")add("discounts",db.from("ss_discounts").select("*").order("code").limit(250));
+  if(tab==="notices")add("announcements",db.from("ss_announcements").select("*").order("created_at",{ascending:false}).limit(100));
+  if(tab==="tickets"||tab==="orders"){
+   add("users",db.from("ss_profiles").select("id,username").limit(500));
+   if(tab==="tickets")add("tickets",pageQuery(db.from("ss_tickets").select("*").order("updated_at",{ascending:false})),true);
+   else add("orders",pageQuery(db.from("ss_orders").select("*").order("created_at",{ascending:false})),true);
+  }
+  if(tab==="settings"){
+   add("settings",db.from("ss_settings").select("*").eq("id",true).single());
+   add("keys",db.from("ss_private_config").select("name"));
+  }
+  await Promise.all(jobs);
+  if(tab==="settings"){response.tokens=(response.keys||[]).map((x:any)=>x.name);delete response.keys;}
+  return response;
  }
  case "adminUser":{
   const uid=String(b.id||"");const updates:any={};
