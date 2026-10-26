@@ -11,7 +11,7 @@ const num=n=>Number(n||0).toLocaleString("fa-IR");
 const normal=s=>String(s||"").replace(/[۰-۹]/g,c=>"۰۱۲۳۴۵۶۷۸۹".indexOf(c)).replace(/[٠-٩]/g,c=>"٠١٢٣٤٥٦٧٨٩".indexOf(c));
 const states={sent:"ارسال شده",review:"در حال بررسی",awaiting_user:"در انتظار پاسخ شما",closed:"بسته شده",closed_support:"بسته شده توسط پشتیبانی"};
 const navItems=[["home","⌂ خانه"],["levels","🚀 شروع بازی"],["shop","🛍 فروشگاه"],["daily","🎁 پاداش روزانه"],["support","🎫 پشتیبانی"],["buycoins","🪙 خرید سکه"],["ledger","📜 گردش سکه"],["orders","🧾 واریزی‌ها"]];
-const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminData:null,
+const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminPage:0,adminData:null,
  currentTicket:null,ticketDetails:null,editingUser:null,editingPackage:null,editingDiscount:null,gameStop:null,gameRun:null,gameStage:null,gameStats:null};
 let toastTimer;
 function toast(message,error=false){const t=$("#toast");t.textContent=String(message);t.className="show"+(error?" error":"");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.className="",5000);}
@@ -209,9 +209,10 @@ async function uploadAttachment(ticketId,file){
  return upload.path;
 }
 function renderAdmin(){
- if(!state.adminData){setPage('<div class="loading"><div class="orbit"></div><h3>بارگذاری پنل مدیریت…</h3></div>');call("adminData").then(x=>{state.adminData=x;renderAdmin();}).catch(e=>setPage('<div class="surface">خطای پنل: '+esc(e.message)+'</div>'));return;}
+ if(!state.adminData){setPage('<div class="loading"><div class="orbit"></div><h3>بارگذاری پنل مدیریت…</h3></div>');call("adminData",{tab:state.adminTab,page:state.adminPage}).then(x=>{state.adminData=x;renderAdmin();}).catch(e=>setPage('<div class="surface">خطای پنل: '+esc(e.message)+'</div>'));return;}
  const t=state.adminTab,a=state.adminData;
  const tabs=[["users","کاربران"],["packages","بسته‌ها"],["discounts","تخفیف‌ها"],["notices","اطلاعیه‌ها"],["tickets","تیکت‌ها"],["orders","سفارش‌ها"],["settings","تنظیمات و توکن‌ها"]];
+ const isPaged=["users","tickets","orders"].includes(t);
  let body="";
  if(t==="users"){
   if(state.editingUser){
@@ -246,7 +247,7 @@ function renderAdmin(){
  if(t==="tickets")body='<div class="surface"><h3>تیکت‌های کاربران</h3>'+a.tickets.map(x=>'<div class="ticket-message"><b>'+esc(x.subject)+'</b><p>کاربر: '+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+' · '+esc(states[x.status]||x.status)+' · '+dateFa(x.updated_at)+'</p><button class="ghost small" data-action="open-ticket" data-id="'+x.id+'">بررسی و پاسخ</button></div>').join("")+'</div>';
  if(t==="orders")body='<div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>کاربر</th><th>زمان</th><th>تعداد</th><th>مبلغ ریال</th><th>وضعیت</th></tr></thead><tbody>'+a.orders.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+'</td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.coins)+'</td><td>'+num(x.amount_rial)+'</td><td>'+esc(x.status==="pending"?(x.precheckout_tx?"در صف استعلام دوره‌ای":(Date.now()-Date.parse(x.created_at)>86400000?"⚠️ معلق بیش از ۲۴ ساعت؛ بررسی دستی":"در انتظار شروع پرداخت")):x.status)+'</td></tr>').join("")+'</tbody></table></div>';
  if(t==="settings")body='<section class="surface"><h3>تنظیمات بازو و قیمت سکه</h3><p>توکن‌ها فقط برای سرور ارسال می‌شوند و به مرورگر کاربران برنمی‌گردند. در کادر توکن خالی بگذارید تا مقدار قبلی حفظ شود.</p><form id="admin-settings"><div class="formgrid"><div class="field"><label>قیمت هر سکه (ریال؛ صفر یعنی فروش متوقف)</label><input name="price_rial_per_coin" type="number" min="0" value="'+esc(a.settings.price_rial_per_coin)+'" required></div><div class="field"><label>لینک رسمی بازوی بله (https://ble.ir/...)</label><input name="bale_url" type="url" value="'+esc(a.settings.bale_url)+'"></div><div class="field"><label>توکن بازوی بله '+(a.tokens.includes("bot_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="bot_token" type="password" autocomplete="off"></div><div class="field"><label>توکن کیف پول بله '+(a.tokens.includes("provider_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="provider_token" type="password" autocomplete="off"></div></div><button class="button" type="submit">ذخیره و تنظیم Webhook</button></form><p class="hint">قبل از تنظیم توکن، هر دو تابع Edge باید منتشر شده باشند.</p></section>';
- setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body);
+ setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body+(isPaged?'<div class="admin-pagination"><button type="button" class="ghost small" data-action="admin-page" data-step="-1" '+(state.adminPage===0?'disabled':'')+'>صفحه قبل</button><span>صفحه '+num(state.adminPage+1)+'</span><button type="button" class="ghost small" data-action="admin-page" data-step="1" '+(!a.hasMore?'disabled':'')+'>صفحه بعد</button></div>':""));
  if(t==="discounts"){syncDiscountDateFields($("#admin-discount"));syncDiscountValueField($("#admin-discount"));}
 }
 async function startLevel(stage){
@@ -268,7 +269,7 @@ async function startLevel(stage){
 }
 async function mutate(action,payload,success="ثبت شد"){
  const r=await call(action,payload);toast(success);
- if(state.adminData&&state.view==="admin"){state.adminData=await call("adminData");renderAdmin();}
+ if(state.adminData&&state.view==="admin"){state.adminData=await call("adminData",{tab:state.adminTab,page:state.adminPage});renderAdmin();}
  else await refresh(false);
  return r;
 }
@@ -295,7 +296,8 @@ document.addEventListener("click",async e=>{
   if(action==="open-ticket")await openTicket(id);
   if(action==="back-tickets"){state.currentTicket=null;state.ticketDetails=null;navigate(state.data.admin?"admin":"support");}
   if(action==="ticket-file"){const d=await call("ticketFile",{path:el.dataset.path});if(d?.signedUrl)window.open(d.signedUrl,"_blank","noopener,noreferrer");}
-  if(action==="admin-tab"){state.adminTab=id;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;renderAdmin();}
+  if(action==="admin-tab"){state.adminTab=id;state.adminPage=0;state.adminData=null;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;renderAdmin();}
+  if(action==="admin-page"){state.adminPage=Math.max(0,state.adminPage+Number(el.dataset.step||0));state.adminData=null;renderAdmin();}
   if(action==="edit-discount"){state.editingDiscount=id;renderAdmin();}
   if(action==="new-discount"){state.editingDiscount=null;renderAdmin();}
   if(action==="calendar-open"){openDiscountCalendar(el.dataset.field);}
