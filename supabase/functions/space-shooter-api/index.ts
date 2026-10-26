@@ -222,7 +222,8 @@ async function adminAction(p:any,b:any){
  case "adminDiscount":{
   const code=onlyString(b.code,32).toUpperCase(),kind=b.kind,value=Number(b.value);
   if(!/^[A-Z0-9_-]{3,32}$/.test(code)||!["percent","rial"].includes(kind)
-   ||!Number.isSafeInteger(value)||value<1||value>2147483647||(kind==="percent"&&value>99))fail("کد تخفیف نامعتبر است.");
+   ||!Number.isSafeInteger(value)||value<1||value>2147483647)fail("کد یا مقدار تخفیف نامعتبر است.");
+   if(kind==="percent"&&value>99)fail("تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ مثلاً برای ۵۰ درصد مقدار ۵۰ وارد کنید.");
   const unlimited=b.unlimited===true,dateUnlimited=b.date_unlimited===true;
   const maxUses=unlimited?null:Number(b.max_uses);
   if(maxUses!==null&&(!Number.isSafeInteger(maxUses)||maxUses<1||maxUses>2147483647))fail("سقف استفاده باید یک عدد مثبت باشد.");
