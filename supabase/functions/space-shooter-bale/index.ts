@@ -93,7 +93,7 @@ async function onPayment(msg:any){
  const id=String(payment?.invoice_payload||""), tx=String(payment?.telegram_payment_charge_id||"");
  const order=(await db.from("ss_orders").select("*").eq("id",id).maybeSingle()).data;
  if(!order||order.bale_chat_id!==chat||payment.currency!=="IRR"||Number(payment.total_amount)!==order.amount_rial||!tx)throw Error("Unmatched payment");
- if(order.status==="paid")return; // Avoid duplicate confirmations on webhook retry.
+ if(order.status==="paid"){if(order.provider_tx!==tx)throw Error("Transaction ID mismatch on previously settled order");return;} // Idempotent webhook retry.
  const result=await bale("inquireTransaction",{transaction_id:tx});
  if(result.status!=="paid"||String(result.id)!==tx||Number(result.amount)!==order.amount_rial||Number(result.userID)!==Number(msg.from?.id))throw Error("Payment not yet verified");
  must(await db.rpc("ss_settle_order",{p_order:order.id,p_transaction:tx,p_amount:order.amount_rial}));
