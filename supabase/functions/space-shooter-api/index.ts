@@ -72,7 +72,8 @@ async function bootstrap(p:any){
 async function userAction(p:any,b:any){
  switch(b.action){
  case "bootstrap":return await bootstrap(p);
- case "daily":return requireOk(await db.rpc("ss_claim_daily",{p_user:p.id}));
+ case "wallet":return requireOk(await db.from("ss_wallets").select("balance").eq("user_id",p.id).single());
+  case "daily":return requireOk(await db.rpc("ss_claim_daily",{p_user:p.id}));
  case "start":{
   const stage=Number(b.stage);
   if(!Number.isInteger(stage)||stage<1||stage>200)fail("مرحله نامعتبر است.");
@@ -223,7 +224,7 @@ async function adminAction(p:any,b:any){
   const code=onlyString(b.code,32).toUpperCase(),kind=b.kind,value=Number(b.value);
   if(!/^[A-Z0-9_-]{3,32}$/.test(code)||!["percent","rial"].includes(kind)
    ||!Number.isSafeInteger(value)||value<1||value>2147483647)fail("کد یا مقدار تخفیف نامعتبر است.");
-   if(kind==="percent"&&value>99)fail("تخفیف درصدی باید بین ۱ تا ۹۹ باشد؛ مثلاً برای ۵۰ درصد مقدار ۵۰ وارد کنید.");
+   if(kind==="percent"&&value>100)fail("تخفیف درصدی باید بین ۱ تا ۱۰۰ باشد؛ مثلاً برای ۵۰ درصد مقدار ۵۰ وارد کنید.");
   const unlimited=b.unlimited===true,dateUnlimited=b.date_unlimited===true;
   const maxUses=unlimited?null:Number(b.max_uses);
   if(maxUses!==null&&(!Number.isSafeInteger(maxUses)||maxUses<1||maxUses>2147483647))fail("سقف استفاده باید یک عدد مثبت باشد.");
