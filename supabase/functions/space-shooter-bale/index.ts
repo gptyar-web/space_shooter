@@ -36,9 +36,9 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
  const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});
  if(error){
   const msg=String(error.message||"");
-  if(/minimum|10000 IRR/i.test(msg))await say(chat,"مبلغ نهایی با این تخفیف کمتر از حداقل ۱۰٬۰۰۰ ریال بله است. تعداد سکه را افزایش دهید یا کد دیگری استفاده کنید.");
+  if(/minimum|10000 IRR/i.test(msg)){await saveSession(chat,{state:"need_coins",coins:null,coupon:null});await say(chat,"مبلغ نهایی با این تخفیف کمتر از حداقل ۱۰٬۰۰۰ ریال بله است. لطفاً تعداد سکهٔ بیشتری برای سفارش تازه وارد کنید.");}
   else if(/already been redeemed/i.test(msg))await say(chat,"این کد رایگان قبلاً توسط این حساب استفاده شده است. از کد دیگری استفاده کنید.");
-  else if(/500 coins/i.test(msg))await say(chat,"هر دریافت رایگان با کد ۱۰۰٪ حداکثر ۵۰۰ سکه است؛ برای سفارش جدید تعداد را کمتر انتخاب کنید.");
+  else if(/500 coins/i.test(msg)){await saveSession(chat,{state:"need_coins",coins:null,coupon:null});await say(chat,"هر دریافت رایگان با کد ۱۰۰٪ حداکثر ۵۰۰ سکه است؛ لطفاً تعداد سکه را دوباره وارد کنید.");}
   else await say(chat,"کد تخفیف یا سفارش پذیرفته نشد. وضعیت کد را بررسی کنید یا «ندارم» ارسال کنید.");
   return;
  }
@@ -65,7 +65,8 @@ async function makeInvoice(chat:number,s:any,coupon:string|null){
   if(error instanceof BaleResponseError){
    const cancelled=await db.rpc("ss_cancel_unpaid_invoice",{p_order:order.order_id,p_chat:chat});
    if(cancelled.error)throw Error("Invoice cancellation failed: "+cancelled.error.message);
-   await say(chat,invoiceErrorMessage(error)+"\nسفارش ردشده لغو شد.");
+   await saveSession(chat,{state:"need_coins",coins:null,coupon:null});
+   await say(chat,invoiceErrorMessage(error)+"\nسفارش ردشده لغو شد. برای خرید تازه تعداد سکه را وارد کنید.");
   }else{
    await say(chat,"وضعیت ارسال فاکتور نامشخص است و سفارش برای جلوگیری از خطای مالی محفوظ مانده است؛ لطفاً با پشتیبانی تماس بگیرید. شماره سفارش: "+order.order_id);
   }
