@@ -19,11 +19,26 @@ async function currentUser(req:Request){
  return profile;
 }
 async function isAdmin(uid:string){const {data}=await db.from("ss_admins").select("id").eq("id",uid).maybeSingle();return !!data;}
-async function registration(b:any){
+async function allowRegistration(req:Request,phone:string){
+ // Hash values so no raw phone number or IP address is retained.
+ const hash=async(value:string)=>{
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(KEY+":ss-register:"+value));
+  return Array.from(new Uint8Array(buf),x=>x.toString(16).padStart(2,"0")).join("");
+ };
+ const ip=onlyString((req.headers.get("x-forwarded-for")||"").split(",")[0],48);
+ const keys:[string,number,number][]=[["reg:global:all",150,3600],["reg:phone:"+await hash(phone),4,3600]];
+ if(ip)keys.push(["reg:ip:"+await hash(ip),12,3600]);
+ for(const [p_key,p_limit,p_window_seconds] of keys){
+  const allowed=requireOk(await db.rpc("ss_allow_registration",{p_key,p_limit,p_window_seconds}));
+  if(!allowed)fail("تعداد تلاش‌ها بیش از حد مجاز است. لطفاً بعداً تلاش کنید.");
+ }
+}
+async function registration(b:any,req:Request){
  const username=onlyString(b.username,24).toLowerCase();
  const first_name=onlyString(b.first_name,70),last_name=onlyString(b.last_name,70),phone=onlyString(b.phone,11),gender=b.gender;
  const password=String(b.password||"");
  if(!/^[a-z0-9_]{3,24}$/.test(username)||!first_name||!last_name||!validPhone(phone)||!["زن","مرد"].includes(gender)||password.length<10||password.length>128) fail("مشخصات نامعتبر است؛ رمز حداقل ۱۰ کاراکتر لازم دارد.");
+  await allowRegistration(req,phone);
  const {data:old}=await db.from("ss_profiles").select("id").or("username.eq."+username+",phone.eq."+phone).limit(1);
  if(old?.length)fail("نام کاربری یا شماره موبایل قبلاً ثبت شده است.");
  const auth=requireOk(await db.auth.admin.createUser({email:emailFor(username),password,email_confirm:true}));
@@ -106,9 +121,10 @@ async function userAction(p:any,b:any){
  }
  case "ticketFile":{
   const path=onlyString(b.path,500);
-  const parts=path.split("/");
-  const t=requireOk(await db.from("ss_tickets").select("*").eq("id",parts[1]||"").maybeSingle());
-  if(parts[0]!=="ss"||!t||t.user_id!==p.id&&!await isAdmin(p.id))fail("دسترسی ندارید.");
+  const match=/^ss\/([a-f0-9-]{36})\/([a-zA-Z0-9._-]{1,120})$/i.exec(path);
+  if(!match)fail("مسیر فایل نامعتبر است.");
+  const t=requireOk(await db.from("ss_tickets").select("*").eq("id",match[1]).maybeSingle());
+  if(!t||t.user_id!==p.id&&!await isAdmin(p.id))fail("دسترسی ندارید.");
   return requireOk(await db.storage.from("ss-ticket-files").createSignedUrl(path,300));
  }
  case "replyTicket":{
@@ -195,7 +211,8 @@ async function adminAction(p:any,b:any){
  case "adminDiscount":{
   const code=onlyString(b.code,32).toUpperCase(),kind=b.kind,value=Number(b.value);
   if(!/^[A-Z0-9_-]{3,32}$/.test(code)||!["percent","rial"].includes(kind)||!Number.isSafeInteger(value)||value<1||(kind==="percent"&&value>99))fail("کد تخفیف نامعتبر است.");
-  const item={code,kind,value,active:b.active!==false,unlimited:b.unlimited===true,
+  const previous=requireOk(await db.from("ss_discounts").select("used_count").eq("code",code).maybeSingle());
+  const item={code,kind,value,used_count:previous?.used_count||0,active:b.active!==false,unlimited:b.unlimited===true,
    max_uses:b.unlimited===true?null:Number(b.max_uses||1),
    valid_from:b.valid_from?new Date(b.valid_from).toISOString():null,
    valid_until:b.valid_until?new Date(b.valid_until).toISOString():null};
@@ -236,7 +253,7 @@ Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return json(req,{ok:false,error:"Method not allowed"},405);
  try{
   const b=await req.json();if(!b||typeof b.action!=="string")fail("درخواست نامعتبر");
-  if(b.action==="register")return json(req,{ok:true,data:await registration(b)});
+  if(b.action==="register")return json(req,{ok:true,data:await registration(b,req)});
   const p=await currentUser(req);
   if(b.action==="bootstrap")return json(req,{ok:true,data:await bootstrap(p)});
   if(!p.active)fail("حساب غیرفعال است: "+(p.disabled_reason||"با پشتیبانی تماس بگیرید."));
