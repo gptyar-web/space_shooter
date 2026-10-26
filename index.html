@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080e27">
+  <title>Space Shooter | نبرد کهکشانی</title>
+  <meta name="description" content="بازی اسپیس شوتر با ۲۰ فصل، ۲۰۰ مرحله، فروشگاه و خرید سکه از بله">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="nebula" aria-hidden="true"></div>
+  <div class="shell">
+    <header id="topbar">
+      <a class="brand" href="#home" id="brand"><span class="brand-icon">✦</span><span>SPACE <strong>SHOOTER</strong><small>نبرد کهکشانی</small></span></a>
+      <div class="header-right">
+        <div class="coinbox" id="coinbox" hidden><span>🪙</span><b id="coinbalance">۰</b><button class="plus" id="coinplus" aria-label="افزایش موجودی">+</button></div>
+        <span id="player-name" class="player-name"></span>
+        <button class="ghost small" id="logout-btn" hidden>خروج</button>
+      </div>
+    </header>
+    <nav id="nav" class="nav" hidden aria-label="فهرست اصلی"></nav>
+    <section id="notice-area"></section>
+    <main id="app" tabindex="-1">
+      <section class="loading"><div class="orbit"></div><h2>در حال آماده‌سازی کهکشان…</h2></section>
+    </main>
+    <footer>ساخته‌شده برای پروژه برنامه‌نویسی کامپیوتر | ارشیا مزدبران | دبیرستان شهید کلاهدوزان ۲</footer>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
