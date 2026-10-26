@@ -12,13 +12,18 @@ async function bale(method:string,parameters:Record<string,unknown>){
 async function say(chat_id:number,text:string,extra:Record<string,unknown>={}){return bale("sendMessage",{chat_id,text,...extra});}
 const contactKeyboard={keyboard:[[{text:"📱 ارسال شماره موبایل من",request_contact:true}]],resize_keyboard:true,one_time_keyboard:true};
 function normalizePhone(phone:string){let p=phone.replace(/[^\d+]/g,"");if(p.startsWith("+98"))p="0"+p.slice(3);if(p.startsWith("98"))p="0"+p.slice(2);return p;}
-async function saveSession(chat_id:number,updates:any){must(await db.from("ss_bale_sessions").upsert({chat_id,...updates,updated_at:new Date().toISOString()}));}
+async function saveSession(chat_id:number,updates:any){
+ // A partial upsert can clear columns that are not supplied (especially user_id).
+ const existing=must(await db.from("ss_bale_sessions").select("*").eq("chat_id",chat_id).maybeSingle());
+ must(await db.from("ss_bale_sessions").upsert({...existing,chat_id,...updates,updated_at:new Date().toISOString()},{onConflict:"chat_id"}));
+}
 async function start(chat_id:number){await saveSession(chat_id,{state:"need_contact",user_id:null,coins:null,coupon:null});await say(chat_id,"به بازوی خرید سکه Space Shooter خوش آمدید! برای شناسایی حساب، با دکمه زیر شماره بله خودتان را به اشتراک بگذارید.",{reply_markup:contactKeyboard});}
 async function makeInvoice(chat:number,s:any,coupon:string|null){
+ const provider=await secret("provider_token");
+ if(!provider){await say(chat,"درگاه کیف پول هنوز توسط مدیر تنظیم نشده است.");return;}
  const {data,error}=await db.rpc("ss_create_order",{p_user:s.user_id,p_chat:chat,p_coins:s.coins,p_coupon:coupon});if(error){await say(chat,"کد تخفیف یا سفارش معتبر نیست: "+error.message+"\nکد صحیح بفرستید یا «ندارم» بنویسید.");return;}
  const order=Array.isArray(data)?data[0]:data;
  if(!order)throw Error("Order not created");
- const provider=await secret("provider_token");if(!provider){await say(chat,"درگاه کیف پول هنوز توسط مدیر تنظیم نشده است.");return;}
  await bale("sendInvoice",{chat_id:chat,title:"سکه بازی Space Shooter",
  description:String(s.coins)+" سکه برای حساب بازی",payload:order.order_id,provider_token:provider,prices:[{label:String(s.coins)+" سکه",amount:order.amount_rial}]});
  await saveSession(chat,{state:"invoice",coupon});
@@ -68,7 +73,8 @@ async function onMessage(msg:any){
 }
 async function onPrecheckout(q:any){
  const order=(await db.from("ss_orders").select("*").eq("id",String(q.invoice_payload||"")).maybeSingle()).data;
- const good=!!order&&order.status==="pending"&&order.amount_rial===Number(q.total_amount)&&q.currency==="IRR"&&order.bale_chat_id===Number(q.from?.id);
+ const profile=order?(await db.from("ss_profiles").select("active").eq("id",order.user_id).maybeSingle()).data:null;
+ const good=!!order&&profile?.active===true&&order.status==="pending"&&order.amount_rial===Number(q.total_amount)&&q.currency==="IRR"&&order.bale_chat_id===Number(q.from?.id);
  return bale("answerPreCheckoutQuery",{pre_checkout_query_id:q.id,ok:good,...(good?{}:{error_message:"مبلغ یا سفارش تأیید نشد."})});
 }
 async function onPayment(msg:any){
@@ -76,9 +82,9 @@ async function onPayment(msg:any){
  const id=String(payment?.invoice_payload||""), tx=String(payment?.telegram_payment_charge_id||"");
  const order=(await db.from("ss_orders").select("*").eq("id",id).maybeSingle()).data;
  if(!order||order.bale_chat_id!==chat||payment.currency!=="IRR"||Number(payment.total_amount)!==order.amount_rial||!tx)throw Error("Unmatched payment");
- if(order.status==="paid"){await say(chat,"سکه‌های این سفارش قبلاً افزوده شده‌اند.");return;}
+ if(order.status==="paid")return; // Avoid duplicate confirmations on webhook retry.
  const result=await bale("inquireTransaction",{transaction_id:tx});
- if(result.status!=="paid"||Number(result.amount)!==order.amount_rial||Number(result.userID)!==Number(msg.from?.id))throw Error("Payment not yet verified");
+ if(result.status!=="paid"||String(result.id)!==tx||Number(result.amount)!==order.amount_rial||Number(result.userID)!==Number(msg.from?.id))throw Error("Payment not yet verified");
  must(await db.rpc("ss_settle_order",{p_order:order.id,p_transaction:tx,p_amount:order.amount_rial}));
  await saveSession(chat,{state:"need_coins",coins:null,coupon:null});
  await say(chat,"پرداخت با موفقیت استعلام شد ✅ "+order.coins+" سکه به موجودی شما افزوده شد.\nشماره سفارش: "+order.id+"\nبرای خرید دوباره تعداد سکه را بفرستید.");
