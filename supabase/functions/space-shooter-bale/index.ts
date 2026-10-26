@@ -1,7 +1,7 @@
 import {createClient} from "npm:@supabase/supabase-js@2.58.0";
-const URL=Deno.env.get("SUPABASE_URL")!;
+const PROJECT_URL=Deno.env.get("SUPABASE_URL")!;
 const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const db=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+const db=createClient(PROJECT_URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 function must<T>(x:{data:T,error:any}):T{if(x.error)throw Error(x.error.message);return x.data;}
 async function secret(name:string){return (await db.from("ss_private_config").select("secret").eq("name",name).maybeSingle()).data?.secret||"";}
 let token="";
@@ -52,6 +52,7 @@ async function onMessage(msg:any){
   if(!link){await say(chat,"کد اتصال نامعتبر یا منقضی شده است. کد جدید از حساب بازی بگیرید.");return;}
   must(await db.from("ss_link_codes").update({consumed_at:new Date().toISOString()}).eq("code",code).is("consumed_at",null));
   const p=must(await db.from("ss_profiles").select("first_name,last_name").eq("id",s.user_id).single());
+   if(!p)throw Error("Linked account not found");
   await saveSession(chat,{state:"need_coins"});
   await say(chat,"سلام "+p.first_name+" "+p.last_name+"! اتصال با موفقیت تأیید شد. چند سکه می‌خواهید بخرید؟ (عدد ۱ تا ۱۰۰۰۰۰)");
   return;
