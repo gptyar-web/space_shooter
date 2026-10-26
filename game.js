@@ -12,15 +12,16 @@ export function startShooter(canvas,{stage,count,onProgress,onEnd}){
   player.x=Math.max(20,Math.min(W-20,(e.clientX-b.left)*W/b.width));
   player.y=Math.max(290,Math.min(H-38,(e.clientY-b.top)*H/b.height));
  };
- const keydown=e=>{if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","a","s","d","W","A","S","D","p","P"].includes(e.key)){if(e.target===document.body)e.preventDefault();keys.add(e.key);if(e.key==="p"||e.key==="P")paused=!paused;}};
+ const keydown=e=>{if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","a","s","d","W","A","S","D","p","P"].includes(e.key)){if(e.target===document.body)e.preventDefault();keys.add(e.key);if((e.key==="p"||e.key==="P")&&!e.repeat)paused=!paused;}};
  const keyup=e=>keys.delete(e.key);
+ const blur=()=>{keys.clear();paused=true;};
  const pointer=e=>{if(running)move(e);};
  canvas.addEventListener("pointermove",pointer);canvas.addEventListener("pointerdown",pointer);
- window.addEventListener("keydown",keydown);window.addEventListener("keyup",keyup);
+ window.addEventListener("keydown",keydown);window.addEventListener("keyup",keyup);window.addEventListener("blur",blur);
  const rand=(a,b)=>a+Math.random()*(b-a);
  const destroy=()=>{
   running=false;cancelAnimationFrame(frame);canvas.removeEventListener("pointermove",pointer);canvas.removeEventListener("pointerdown",pointer);
-  window.removeEventListener("keydown",keydown);window.removeEventListener("keyup",keyup);
+  window.removeEventListener("keydown",keydown);window.removeEventListener("keyup",keyup);window.removeEventListener("blur",blur);
  };
  function finish(won){
   if(ended)return;ended=true;
