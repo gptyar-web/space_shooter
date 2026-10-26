@@ -11,7 +11,7 @@ const num=n=>Number(n||0).toLocaleString("fa-IR");
 const normal=s=>String(s||"").replace(/[۰-۹]/g,c=>"۰۱۲۳۴۵۶۷۸۹".indexOf(c)).replace(/[٠-٩]/g,c=>"٠١٢٣٤٥٦٧٨٩".indexOf(c));
 const states={sent:"ارسال شده",review:"در حال بررسی",awaiting_user:"در انتظار پاسخ شما",closed:"بسته شده",closed_support:"بسته شده توسط پشتیبانی"};
 const navItems=[["home","⌂ خانه"],["levels","🚀 شروع بازی"],["shop","🛍 فروشگاه"],["daily","🎁 پاداش روزانه"],["support","🎫 پشتیبانی"],["buycoins","🪙 خرید سکه"],["ledger","📜 گردش سکه"],["orders","🧾 واریزی‌ها"]];
-const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminPage:0,adminData:null,
+const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminPage:0,adminArchived:false,adminData:null,
  currentTicket:null,ticketDetails:null,editingUser:null,editingPackage:null,editingDiscount:null,gameStop:null,gameRun:null,gameStage:null,gameStats:null};
 let toastTimer;
 function toast(message,error=false){const t=$("#toast");t.textContent=String(message);t.className="show"+(error?" error":"");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.className="",5000);}
@@ -37,7 +37,7 @@ function syncDiscountValueField(form){
  value.max=kind==="percent"?"100":"2147483647";
  const label=form.querySelector("#discount-value-hint");
  if(label)label.textContent=kind==="percent"
-  ?"تخفیف درصدی از ۱ تا ۱۰۰ مجاز است؛ ۱۰۰٪ یعنی دریافت رایگان (یک‌بار برای هر حساب، حداکثر ۵۰۰ سکه)."
+  ?"تخفیف درصدی از ۱ تا ۱۰۰ مجاز است؛ ۱۰۰٪ یعنی دریافت رایگان (یک‌بار برای هر حساب؛ بدون محدودیت ویژهٔ ۵۰۰ سکه)."
   :"مبلغ ثابت تخفیف را به ریال وارد کنید.";
 }
 function discountCalendarMarkup(pop){
@@ -208,8 +208,18 @@ async function uploadAttachment(ticketId,file){
  if(error)throw Error(error.message);
  return upload.path;
 }
+function renderOrderManagement(a){
+ const archived=state.adminArchived===true;
+ const status=x=>x.status==="pending"
+   ?(x.precheckout_tx?"در صف استعلام دوره‌ای":(Date.now()-Date.parse(x.created_at)>86400000?"⚠️ معلق بیش از ۲۴ ساعت؛ بررسی دستی":"در انتظار شروع پرداخت"))
+   :x.status==="paid"?"تکمیل‌شده":x.status==="failed"?"ناموفق":esc(x.status);
+ return '<section class="surface"><div class="section-head"><div><h3>مدیریت سفارش‌ها</h3><p class="hint">حذف، سفارش را بایگانی می‌کند؛ سوابق مالی و بررسی پرداخت محفوظ می‌مانند. برای بازگردانی به بایگانی بروید.</p></div><div class="buttons"><button type="button" class="ghost small '+(!archived?"selected":"")+'" data-action="admin-order-view" data-archived="false">سفارش‌های جاری</button><button type="button" class="ghost small '+(archived?"selected":"")+'" data-action="admin-order-view" data-archived="true">بایگانی سفارش‌ها</button></div></div>'+
+ '<div class="scroll"><table><thead><tr><th>شماره سفارش</th><th>کاربر</th><th>زمان</th><th>تعداد</th><th>مبلغ ریال</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>'+
+ a.orders.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+'</td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.coins)+'</td><td>'+num(x.amount_rial)+'</td><td>'+status(x)+'</td><td><button type="button" class="ghost small '+(archived?"":"danger")+'" data-action="admin-order-archive" data-id="'+esc(x.id)+'" data-archived="'+archived+'">'+(archived?"بازگردانی":"حذف")+'</button></td></tr>').join("")+
+ '</tbody></table></div>'+(a.orders.length===0?'<p class="empty">سفارشی در این بخش ثبت نشده است.</p>':"")+'</section>';
+}
 function renderAdmin(){
- if(!state.adminData){setPage('<div class="loading"><div class="orbit"></div><h3>بارگذاری پنل مدیریت…</h3></div>');call("adminData",{tab:state.adminTab,page:state.adminPage}).then(x=>{state.adminData=x;renderAdmin();}).catch(e=>setPage('<div class="surface">خطای پنل: '+esc(e.message)+'</div>'));return;}
+ if(!state.adminData){setPage('<div class="loading"><div class="orbit"></div><h3>بارگذاری پنل مدیریت…</h3></div>');call("adminData",{tab:state.adminTab,page:state.adminPage,archived:state.adminArchived}).then(x=>{state.adminData=x;renderAdmin();}).catch(e=>setPage('<div class="surface">خطای پنل: '+esc(e.message)+'</div>'));return;}
  const t=state.adminTab,a=state.adminData;
  const tabs=[["users","کاربران"],["packages","بسته‌ها"],["discounts","تخفیف‌ها"],["notices","اطلاعیه‌ها"],["tickets","تیکت‌ها"],["orders","سفارش‌ها"],["settings","تنظیمات و توکن‌ها"]];
  const isPaged=["users","tickets","orders"].includes(t);
@@ -245,7 +255,7 @@ function renderAdmin(){
   body='<div class="two-col"><section class="surface"><h3>اطلاعیه جدید</h3><form id="admin-notice"><div class="field"><label>موضوع</label><input name="title" required></div><div class="field"><label>شرح اطلاعیه</label><textarea name="body" required></textarea></div><button class="button" type="submit">انتشار اطلاعیه</button></form></section><section class="surface"><h3>اطلاعیه‌ها</h3>'+a.announcements.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b><p>'+esc(x.body)+'</p><small>'+dateFa(x.created_at)+'</small></div>').join("")+'</section></div>';
  }
  if(t==="tickets")body='<div class="surface"><h3>تیکت‌های کاربران</h3>'+a.tickets.map(x=>'<div class="ticket-message"><b>'+esc(x.subject)+'</b><p>کاربر: '+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+' · '+esc(states[x.status]||x.status)+' · '+dateFa(x.updated_at)+'</p><button class="ghost small" data-action="open-ticket" data-id="'+x.id+'">بررسی و پاسخ</button></div>').join("")+'</div>';
- if(t==="orders")body='<div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>کاربر</th><th>زمان</th><th>تعداد</th><th>مبلغ ریال</th><th>وضعیت</th></tr></thead><tbody>'+a.orders.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+'</td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.coins)+'</td><td>'+num(x.amount_rial)+'</td><td>'+esc(x.status==="pending"?(x.precheckout_tx?"در صف استعلام دوره‌ای":(Date.now()-Date.parse(x.created_at)>86400000?"⚠️ معلق بیش از ۲۴ ساعت؛ بررسی دستی":"در انتظار شروع پرداخت")):x.status)+'</td></tr>').join("")+'</tbody></table></div>';
+ if(t==="orders")body=renderOrderManagement(a);
  if(t==="settings")body='<section class="surface"><h3>تنظیمات بازو و قیمت سکه</h3><p>توکن‌ها فقط برای سرور ارسال می‌شوند و به مرورگر کاربران برنمی‌گردند. در کادر توکن خالی بگذارید تا مقدار قبلی حفظ شود.</p><form id="admin-settings"><div class="formgrid"><div class="field"><label>قیمت هر سکه (ریال؛ صفر یعنی فروش متوقف)</label><input name="price_rial_per_coin" type="number" min="0" value="'+esc(a.settings.price_rial_per_coin)+'" required></div><div class="field"><label>لینک رسمی بازوی بله (https://ble.ir/...)</label><input name="bale_url" type="url" value="'+esc(a.settings.bale_url)+'"></div><div class="field"><label>توکن بازوی بله '+(a.tokens.includes("bot_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="bot_token" type="password" autocomplete="off"></div><div class="field"><label>توکن کیف پول بله '+(a.tokens.includes("provider_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="provider_token" type="password" autocomplete="off"></div></div><button class="button" type="submit">ذخیره و تنظیم Webhook</button></form><p class="hint">قبل از تنظیم توکن، هر دو تابع Edge باید منتشر شده باشند.</p></section>';
  setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body+(isPaged?'<div class="admin-pagination"><button type="button" class="ghost small" data-action="admin-page" data-step="-1" '+(state.adminPage===0?'disabled':'')+'>صفحه قبل</button><span>صفحه '+num(state.adminPage+1)+'</span><button type="button" class="ghost small" data-action="admin-page" data-step="1" '+(!a.hasMore?'disabled':'')+'>صفحه بعد</button></div>':""));
  if(t==="discounts"){syncDiscountDateFields($("#admin-discount"));syncDiscountValueField($("#admin-discount"));}
@@ -269,7 +279,7 @@ async function startLevel(stage){
 }
 async function mutate(action,payload,success="ثبت شد"){
  const r=await call(action,payload);toast(success);
- if(state.adminData&&state.view==="admin"){state.adminData=await call("adminData",{tab:state.adminTab,page:state.adminPage});renderAdmin();}
+ if(state.adminData&&state.view==="admin"){state.adminData=await call("adminData",{tab:state.adminTab,page:state.adminPage,archived:state.adminArchived});renderAdmin();}
  else await refresh(false);
  return r;
 }
@@ -298,6 +308,18 @@ document.addEventListener("click",async e=>{
   if(action==="ticket-file"){const d=await call("ticketFile",{path:el.dataset.path});if(d?.signedUrl)window.open(d.signedUrl,"_blank","noopener,noreferrer");}
   if(action==="admin-tab"){state.adminTab=id;state.adminPage=0;state.adminData=null;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;renderAdmin();}
   if(action==="admin-page"){state.adminPage=Math.max(0,state.adminPage+Number(el.dataset.step||0));state.adminData=null;renderAdmin();}
+  if(action==="admin-order-view"){state.adminArchived=el.dataset.archived==="true";state.adminPage=0;state.adminData=null;renderAdmin();}
+  if(action==="admin-order-archive"){
+   const archive=el.dataset.archived!=="true";
+   const message=archive
+    ?"آیا این سفارش از فهرست مدیریت حذف و بایگانی شود؟ گردش سکه، سابقه پرداخت و بررسی سفارش‌های معلق حذف یا متوقف نمی‌شوند."
+    :"آیا این سفارش از بایگانی بازگردانده شود؟";
+   if(confirm(message)){
+    const result=await call("adminArchiveOrder",{id,archived:archive,reason:"اقدام مدیر از پنل"});
+    if(result.changed){toast(archive?"سفارش بایگانی شد؛ سوابق مالی حفظ شدند.":"سفارش بازگردانده شد.");state.adminPage=0;state.adminData=null;renderAdmin();}
+    else toast("وضعیت این سفارش قبلاً تغییر کرده است.");
+   }
+  }
   if(action==="edit-discount"){state.editingDiscount=id;renderAdmin();}
   if(action==="new-discount"){state.editingDiscount=null;renderAdmin();}
   if(action==="calendar-open"){openDiscountCalendar(el.dataset.field);}
@@ -307,7 +329,7 @@ document.addEventListener("click",async e=>{
   if(action==="calendar-day"){
    const form=$("#admin-discount"),pop=form?.querySelector('[data-calendar-for="'+el.dataset.field+'"]');if(pop){form.elements.namedItem(el.dataset.field).value=formatJalaliDate(Number(pop.dataset.year),Number(pop.dataset.month),Number(el.dataset.day));closeDiscountCalendars();}
   }
-  if(action==="admin-refresh"){state.adminData=await call("adminData");renderAdmin();}
+  if(action==="admin-refresh"){state.adminData=await call("adminData",{tab:state.adminTab,page:state.adminPage,archived:state.adminArchived});renderAdmin();}
   if(action==="edit-user"){state.editingUser=id;renderAdmin();}
   if(action==="cancel-edit-user"){state.editingUser=null;renderAdmin();}
   if(action==="edit-package"){state.editingPackage=id;renderAdmin();}
