@@ -20,6 +20,11 @@ jobs:
           node --check jalali-calendar.js
       - name: Game regression tests
         run: node --test tests/*.test.mjs
+      - name: Verify packaged GitHub Pages modules
+        run: |
+          mkdir -p _site
+          cp index.html ./*.js style.css _site/
+          node --test tests/site-deployment.test.mjs
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
