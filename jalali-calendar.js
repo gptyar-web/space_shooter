@@ -8,7 +8,7 @@ function normalizeDigits(s){return String(s??"").replace(/[۰-۹]/g,c=>String("�
 function pickPart(parts,name){return Number(parts.find(x=>x.type===name)?.value);}
 
 export function jalaliToUTC(year,month,day){
- if(!Number.isInteger(year)||year<1300||year>1599||!Number.isInteger(month)||month<1||month>12||!Number.isInteger(day)||day<1||day>31)throw Error("تاریخ شمسی نامعتبر است.");
+ if(!Number.isInteger(year)||year<1300||year>1600||!Number.isInteger(month)||month<1||month>12||!Number.isInteger(day)||day<1||day>31)throw Error("تاریخ شمسی نامعتبر است.");
  const start=Date.UTC(year+621,0,1);
  for(let offset=0;offset<455;offset++){
   const d=new Date(start+offset*86400000),parts=persianPartsFormatter.formatToParts(d);
