@@ -17,6 +17,7 @@ jobs:
         run: |
           node --check app.js
           node --check game.js
+          node --check jalali-calendar.js
       - name: Game regression tests
         run: node --test tests/*.test.mjs
       - uses: denoland/setup-deno@v2
