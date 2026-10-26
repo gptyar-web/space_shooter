@@ -18,8 +18,11 @@ jobs:
           node --check app.js
           node --check game.js
           node --check jalali-calendar.js
-      - name: Game regression tests
-        run: node --test tests/*.test.mjs
+      - name: Package and test game and Pages
+        run: |
+          mkdir -p _site
+          cp index.html ./*.js style.css _site/
+          node --test tests/*.test.mjs
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
