@@ -1,5 +1,6 @@
 import {createClient} from "https://esm.sh/@supabase/supabase-js@2.58.0?bundle";
 import {startShooter} from "./game.js";
+import {jalaliMonths,jalaliToday,jalaliMonthGrid,parseJalaliDate,formatJalaliDate,jalaliFromISO,jalaliToISO,shiftJalaliMonth} from "./jalali-calendar.js";
 const PROJECT="https://efibfevyiepkwpnobaro.supabase.co";
 const PUBLIC_KEY="sb_publishable_zbEGYX6DGhjFRQf6FWiIWQ_IdYj84nW";
 const client=createClient(PROJECT,PUBLIC_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
@@ -11,19 +12,48 @@ const normal=s=>String(s||"").replace(/[۰-۹]/g,c=>"۰۱۲۳۴۵۶۷۸۹".index
 const states={sent:"ارسال شده",review:"در حال بررسی",awaiting_user:"در انتظار پاسخ شما",closed:"بسته شده",closed_support:"بسته شده توسط پشتیبانی"};
 const navItems=[["home","⌂ خانه"],["levels","🚀 شروع بازی"],["shop","🛍 فروشگاه"],["daily","🎁 پاداش روزانه"],["support","🎫 پشتیبانی"],["buycoins","🪙 خرید سکه"],["ledger","📜 گردش سکه"],["orders","🧾 واریزی‌ها"]];
 const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminData:null,
- currentTicket:null,ticketDetails:null,editingUser:null,editingPackage:null,gameStop:null,gameRun:null,gameStage:null,gameStats:null};
+ currentTicket:null,ticketDetails:null,editingUser:null,editingPackage:null,editingDiscount:null,gameStop:null,gameRun:null,gameStage:null,gameStats:null};
 let toastTimer;
 function toast(message,error=false){const t=$("#toast");t.textContent=String(message);t.className="show"+(error?" error":"");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.className="",5000);}
 function dateFa(d){if(!d)return "—";const parts=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(d));const get=x=>parts.find(p=>p.type===x)?.value||"";return get("hour")+":"+get("minute")+"  "+get("day")+"/"+get("month")+"/"+get("year");}
 function dayFa(d){return d?new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(d)):"—";}
-function faToISO(s){const m=normal(s).trim().match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);if(!m)throw Error("تاریخ باید مانند ۱۴۰۵/۰۸/۰۵ ۱۹:۳۰ باشد.");
- const [jy,jm,jd,hh,mm]=m.slice(1).map(Number);if(jm<1||jm>12||jd<1||jd>31||hh>23||mm>59)throw Error("تاریخ یا ساعت نامعتبر است.");
- const df=new Intl.DateTimeFormat("en-US-u-ca-persian",{year:"numeric",month:"numeric",day:"numeric",timeZone:"UTC"});
- const y=jy+621;for(let i=-30;i<455;i++){const d=new Date(Date.UTC(y,0,1+i)),p=df.formatToParts(d),g=k=>Number(p.find(x=>x.type===k)?.value);
-  if(g("year")===jy&&g("month")===jm&&g("day")===jd)return new Date(d.getTime()+(hh*60+mm-210)*60000).toISOString();
- }throw Error("تاریخ شمسی یافت نشد.");}
-function fmtDateInput(d){return !d?"":dateFa(d).replace(/\s+/g," ");}
 function formObj(form){const out=Object.fromEntries(new FormData(form).entries());for(const k in out)if(typeof out[k]==="string")out[k]=normal(out[k]).trim();return out;}
+
+function closeDiscountCalendars(){
+ document.querySelectorAll(".jalali-popup").forEach(p=>p.hidden=true);
+}
+function syncDiscountDateFields(form){
+ const isUnlimited=form.elements.namedItem("date_unlimited").checked;
+ for(const name of ["valid_from","valid_until","start_time","end_time"]){
+  const input=form.elements.namedItem(name);
+  input.disabled=isUnlimited;input.required=!isUnlimited;
+ }
+ if(isUnlimited)closeDiscountCalendars();
+}
+function discountCalendarMarkup(pop){
+ const year=Number(pop.dataset.year),month=Number(pop.dataset.month),field=pop.dataset.calendarFor;
+ const selected=parseJalaliDate(document.querySelector('#admin-discount [name="'+field+'"]').value);
+ const today=jalaliToday();
+ const week=["ش","ی","د","س","چ","پ","ج"];
+ return '<div class="calendar-heading"><button type="button" class="ghost small" data-action="calendar-month" data-step="-1" data-field="'+field+'" aria-label="ماه قبل">❮</button><strong>'+jalaliMonths[month-1]+' '+num(year)+'</strong><button type="button" class="ghost small" data-action="calendar-month" data-step="1" data-field="'+field+'" aria-label="ماه بعد">❯</button></div><div class="calendar-grid">'+
+ week.map(w=>'<span class="weekday">'+w+'</span>').join("")+
+ jalaliMonthGrid(year,month).map(day=>day===null?'<span class="calendar-empty"></span>':'<button type="button" class="calendar-day'+(selected?.year===year&&selected?.month===month&&selected?.day===day?" selected":"")+(today.year===year&&today.month===month&&today.day===day?" today":"")+'" data-action="calendar-day" data-field="'+field+'" data-day="'+day+'" aria-label="روز '+num(day)+'" aria-pressed="'+(selected?.year===year&&selected?.month===month&&selected?.day===day)+'">'+num(day)+'</button>').join("")+
+ '</div><p class="hint">روز را از تقویم شمسی انتخاب کنید.</p>';
+}
+function openDiscountCalendar(field){
+ if(!["valid_from","valid_until"].includes(field))return;
+ const form=$("#admin-discount");if(!form||form.elements.namedItem("date_unlimited").checked)return;
+ const pop=form.querySelector('[data-calendar-for="'+field+'"]'),input=form.elements.namedItem(field);
+ if(!pop)return;
+ const shouldOpen=pop.hidden;
+ closeDiscountCalendars();
+ if(!shouldOpen)return;
+ const d=parseJalaliDate(input.value)||jalaliToday();
+ pop.dataset.year=String(d.year);pop.dataset.month=String(d.month);
+ pop.innerHTML=discountCalendarMarkup(pop);pop.hidden=false;
+ pop.querySelector("button")?.focus();
+}
+
 function setPage(html){$("#app").innerHTML=html;$("#app").focus({preventScroll:true});}
 async function call(action,payload={}){
  const token=state.session?.access_token;
@@ -181,7 +211,17 @@ function renderAdmin(){
   body='<div class="two-col"><section class="surface"><h3>ثبت / ویرایش بسته</h3><form id="admin-package">'+(p?'<input name="id" type="hidden" value="'+esc(p.id)+'">':"")+'<div class="field"><label>نام بسته</label><input name="title" value="'+esc(p?.title||"")+'" required></div><div class="field"><label>توضیحات</label><textarea name="description">'+esc(p?.description||"")+'</textarea></div><div class="field"><label>هزینه سکه</label><input name="coins" type="number" min="1" value="'+esc(p?.coins||"")+'" required></div><div class="field"><label><input name="active" type="checkbox" '+(p?.active!==false?"checked":"")+'> فعال باشد</label></div><button type="submit" class="button">ذخیره بسته</button> <button type="button" class="ghost" data-action="new-package">بسته جدید</button></form></section><section class="surface"><h3>بسته‌های ثبت‌شده</h3>'+a.packages.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b> · '+num(x.coins)+' سکه · '+(x.active?"فعال":"غیرفعال")+' <button class="ghost small" data-action="edit-package" data-id="'+x.id+'">ویرایش</button></div>').join("")+'</section></div>';
  }
  if(t==="discounts"){
-  body='<div class="two-col"><section class="surface"><h3>ثبت کد تخفیف</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" required></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent">درصد</option><option value="rial">مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" required></div><div class="field"><label>شروع اعتبار (شمسی؛ نمونه: ۱۴۰۵/۰۸/۰۵ ۱۹:۳۰)</label><input name="valid_from" placeholder="۱۴۰۵/۰۸/۰۵ ۱۹:۳۰"></div><div class="field"><label>پایان اعتبار (شمسی)</label><input name="valid_until" placeholder="۱۴۰۵/۰۸/۳۰ ۲۳:۵۹"></div><div class="field"><label>سقف تعداد استفاده</label><input name="max_uses" type="number" min="1" value="1"></div><div class="field"><label><input name="unlimited" type="checkbox"> بدون محدودیت تعداد استفاده</label></div><button class="button" type="submit">ثبت کد</button></form></section><section class="surface"><h3>کدهای موجود</h3>'+a.discounts.map(x=>'<div class="ticket-message"><b>'+esc(x.code)+'</b><p>'+num(x.value)+(x.kind==="percent"?"٪":" ریال")+' · استفاده: '+num(x.used_count)+' · '+(x.unlimited?"نامحدود":"حداکثر "+num(x.max_uses))+'</p><p class="hint">'+dayFa(x.valid_from)+' تا '+dayFa(x.valid_until)+'</p></div>').join("")+'</section></div>';
+  const d=a.discounts.find(x=>x.code===state.editingDiscount);
+  const start=jalaliFromISO(d?.valid_from),end=jalaliFromISO(d?.valid_until);
+  const noDates=!d||(!d.valid_from&&!d.valid_until);
+  const dateField=(field,label,value,timeName,timeValue)=>
+   '<div class="field calendar-field"><label for="discount-'+field+'">'+label+'</label><div class="calendar-input-row"><input id="discount-'+field+'" name="'+field+'" value="'+esc(value)+'" placeholder="انتخاب از تقویم شمسی" readonly><button type="button" class="ghost calendar-open" data-action="calendar-open" data-field="'+field+'" aria-label="باز کردن تقویم '+label+'">📅 تقویم</button></div><div class="jalali-popup" data-calendar-for="'+field+'" role="dialog" aria-label="تقویم '+label+'" hidden></div></div><div class="field"><label for="discount-'+timeName+'">ساعت '+label+'</label><input id="discount-'+timeName+'" type="time" name="'+timeName+'" value="'+esc(timeValue)+'" required></div>';
+  body='<div class="two-col"><section class="surface"><h3>'+(d?"ویرایش کد تخفیف":"ثبت کد تخفیف")+'</h3><form id="admin-discount"><div class="field"><label>کد انگلیسی</label><input name="code" pattern="[A-Za-z0-9_-]{3,32}" value="'+esc(d?.code||"")+'" '+(d?"readonly":"required")+'></div><div class="field"><label>نوع تخفیف</label><select name="kind"><option value="percent" '+(d?.kind==="percent"?"selected":"")+'>درصد</option><option value="rial" '+(d?.kind==="rial"?"selected":"")+'>مبلغ به ریال</option></select></div><div class="field"><label>میزان تخفیف</label><input name="value" type="number" min="1" value="'+esc(d?.value||"")+'" required></div>'+
+   '<div class="field"><label><input type="checkbox" name="date_unlimited" '+(noDates?"checked":"")+'> بدون محدودیت زمانی (تاریخ نامحدود)</label></div><div class="formgrid">'+
+   dateField("valid_from","شروع اعتبار",start.date,"start_time",start.time||"00:00")+
+   dateField("valid_until","پایان اعتبار",end.date,"end_time",end.time||"23:59")+
+   '</div><div class="field"><label>سقف تعداد استفاده</label><input name="max_uses" type="number" min="1" value="'+esc(d?.max_uses||1)+'"></div><div class="field"><label><input name="unlimited" type="checkbox" '+(d?.unlimited?"checked":"")+'> بدون محدودیت تعداد استفاده</label></div><div class="field"><label><input name="active" type="checkbox" '+(d?.active!==false?"checked":"")+'> فعال باشد</label></div><button class="button" type="submit">'+(d?"ذخیره تغییرات":"ثبت کد")+'</button> <button type="button" class="ghost" data-action="new-discount">کد جدید</button></form></section>'+
+   '<section class="surface"><h3>کدهای موجود</h3>'+a.discounts.map(x=>'<div class="ticket-message"><b>'+esc(x.code)+'</b><p>'+num(x.value)+(x.kind==="percent"?"٪":" ریال")+' · استفاده: '+num(x.used_count)+' · '+(x.unlimited?"تعداد استفاده نامحدود":"حداکثر "+num(x.max_uses))+'</p><p class="hint">'+(x.valid_from||x.valid_until?dayFa(x.valid_from)+' تا '+dayFa(x.valid_until):"اعتبار زمانی نامحدود")+' · '+(x.active?"فعال":"غیرفعال")+'</p><button type="button" class="ghost small" data-action="edit-discount" data-id="'+esc(x.code)+'">ویرایش</button></div>').join("")+'</section></div>';
  }
  if(t==="notices"){
   body='<div class="two-col"><section class="surface"><h3>اطلاعیه جدید</h3><form id="admin-notice"><div class="field"><label>موضوع</label><input name="title" required></div><div class="field"><label>شرح اطلاعیه</label><textarea name="body" required></textarea></div><button class="button" type="submit">انتشار اطلاعیه</button></form></section><section class="surface"><h3>اطلاعیه‌ها</h3>'+a.announcements.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b><p>'+esc(x.body)+'</p><small>'+dateFa(x.created_at)+'</small></div>').join("")+'</section></div>';
@@ -190,6 +230,7 @@ function renderAdmin(){
  if(t==="orders")body='<div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>کاربر</th><th>زمان</th><th>تعداد</th><th>مبلغ ریال</th><th>وضعیت</th></tr></thead><tbody>'+a.orders.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+'</td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.coins)+'</td><td>'+num(x.amount_rial)+'</td><td>'+esc(x.status)+'</td></tr>').join("")+'</tbody></table></div>';
  if(t==="settings")body='<section class="surface"><h3>تنظیمات بازو و قیمت سکه</h3><p>توکن‌ها فقط برای سرور ارسال می‌شوند و به مرورگر کاربران برنمی‌گردند. در کادر توکن خالی بگذارید تا مقدار قبلی حفظ شود.</p><form id="admin-settings"><div class="formgrid"><div class="field"><label>قیمت هر سکه (ریال؛ صفر یعنی فروش متوقف)</label><input name="price_rial_per_coin" type="number" min="0" value="'+esc(a.settings.price_rial_per_coin)+'" required></div><div class="field"><label>لینک رسمی بازوی بله (https://ble.ir/...)</label><input name="bale_url" type="url" value="'+esc(a.settings.bale_url)+'"></div><div class="field"><label>توکن بازوی بله '+(a.tokens.includes("bot_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="bot_token" type="password" autocomplete="off"></div><div class="field"><label>توکن کیف پول بله '+(a.tokens.includes("provider_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="provider_token" type="password" autocomplete="off"></div></div><button class="button" type="submit">ذخیره و تنظیم Webhook</button></form><p class="hint">قبل از تنظیم توکن، هر دو تابع Edge باید منتشر شده باشند.</p></section>';
  setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body);
+ if(t==="discounts")syncDiscountDateFields($("#admin-discount"));
 }
 async function startLevel(stage){
  try{
@@ -213,6 +254,7 @@ async function mutate(action,payload,success="ثبت شد"){
  return r;
 }
 document.addEventListener("click",async e=>{
+ if(!e.target.closest(".calendar-field"))closeDiscountCalendars();
  const el=e.target.closest("[data-nav],[data-action],#logout-btn,#coinplus");if(!el)return;
  if(el.id==="logout-btn"||el.dataset.action==="logout"){await client.auth.signOut();return;}
  if(el.id==="coinplus"){navigate("buycoins");return;}
@@ -233,7 +275,16 @@ document.addEventListener("click",async e=>{
   if(action==="open-ticket")await openTicket(id);
   if(action==="back-tickets"){state.currentTicket=null;state.ticketDetails=null;navigate(state.data.admin?"admin":"support");}
   if(action==="ticket-file"){const d=await call("ticketFile",{path:el.dataset.path});if(d?.signedUrl)window.open(d.signedUrl,"_blank","noopener,noreferrer");}
-  if(action==="admin-tab"){state.adminTab=id;state.editingUser=null;state.editingPackage=null;renderAdmin();}
+  if(action==="admin-tab"){state.adminTab=id;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;renderAdmin();}
+  if(action==="edit-discount"){state.editingDiscount=id;renderAdmin();}
+  if(action==="new-discount"){state.editingDiscount=null;renderAdmin();}
+  if(action==="calendar-open"){openDiscountCalendar(el.dataset.field);}
+  if(action==="calendar-month"){
+   const pop=$("#admin-discount")?.querySelector('[data-calendar-for="'+el.dataset.field+'"]');if(pop){const moved=shiftJalaliMonth(Number(pop.dataset.year),Number(pop.dataset.month),Number(el.dataset.step));if(moved.year>=1300&&moved.year<=1599){pop.dataset.year=String(moved.year);pop.dataset.month=String(moved.month);pop.innerHTML=discountCalendarMarkup(pop);}}
+  }
+  if(action==="calendar-day"){
+   const form=$("#admin-discount"),pop=form?.querySelector('[data-calendar-for="'+el.dataset.field+'"]');if(pop){form.elements.namedItem(el.dataset.field).value=formatJalaliDate(Number(pop.dataset.year),Number(pop.dataset.month),Number(el.dataset.day));closeDiscountCalendars();}
+  }
   if(action==="admin-refresh"){state.adminData=await call("adminData");renderAdmin();}
   if(action==="edit-user"){state.editingUser=id;renderAdmin();}
   if(action==="cancel-edit-user"){state.editingUser=null;renderAdmin();}
@@ -274,10 +325,19 @@ document.addEventListener("submit",async e=>{
   if(id==="admin-user"){await mutate("adminUser",{...b,active:b.active==="true",password:b.password||undefined});state.editingUser=null;renderAdmin();}
   if(id==="admin-coins"){await mutate("adminCoins",{id:b.id,delta:Number(b.delta)});}
   if(id==="admin-package"){await mutate("adminPackage",{...b,coins:Number(b.coins),active:!!form.elements.namedItem("active").checked});state.editingPackage=null;renderAdmin();}
-  if(id==="admin-discount"){await mutate("adminDiscount",{code:b.code,kind:b.kind,value:Number(b.value),unlimited:!!form.elements.namedItem("unlimited").checked,max_uses:Number(b.max_uses||1),valid_from:b.valid_from?faToISO(b.valid_from):null,valid_until:b.valid_until?faToISO(b.valid_until):null});}
+  if(id==="admin-discount"){
+   const date_unlimited=form.elements.namedItem("date_unlimited").checked;
+   const from=date_unlimited?null:jalaliToISO(b.valid_from,b.start_time);
+   const until=date_unlimited?null:jalaliToISO(b.valid_until,b.end_time,true);
+   if(!date_unlimited&&Date.parse(from)>Date.parse(until))throw Error("پایان اعتبار نباید قبل از شروع اعتبار باشد.");
+   await mutate("adminDiscount",{code:b.code,kind:b.kind,value:Number(b.value),unlimited:form.elements.namedItem("unlimited").checked,date_unlimited,active:form.elements.namedItem("active").checked,max_uses:Number(b.max_uses||1),valid_from:from,valid_until:until});
+   state.editingDiscount=null;renderAdmin();
+  }
   if(id==="admin-notice"){await mutate("adminNotice",{title:b.title,body:b.body});}
   if(id==="admin-settings"){const r=await mutate("adminSettings",{price_rial_per_coin:Number(b.price_rial_per_coin),bale_url:b.bale_url,bot_token:b.bot_token,provider_token:b.provider_token});toast("تنظیمات ثبت شد. وضعیت وب‌هوک: "+esc(r.webhook));}
  }catch(err){toast(err.message,true);}
  finally{if(button&&button.isConnected)button.disabled=false;}
 });
+document.addEventListener("change",e=>{if(e.target.matches("#admin-discount [name=date_unlimited]"))syncDiscountDateFields(e.target.form);});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDiscountCalendars();});
 init();
