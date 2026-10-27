@@ -1,3 +1,4 @@
+import {galaxyAction,galaxyActions,galaxyBootstrap} from "./galaxy.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 const URL = Deno.env.get("SUPABASE_URL")!;
 const KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -52,7 +53,7 @@ async function registration(b:any,req:Request){
 }
 async function bootstrap(p:any){
  if(!p.active)return {profile:p,disabled:true};
- const [wallet,progress,daily,settings,packages,announcements,ledger,orders,tickets,purchases]=await Promise.all([
+ const [wallet,progress,daily,settings,packages,announcements,ledger,orders,tickets,purchases,galaxy]=await Promise.all([
  db.from("ss_wallets").select("balance").eq("user_id",p.id).single(),
  db.from("ss_progress").select("stage,best_score,cleared").eq("user_id",p.id),
  db.from("ss_daily_claims").select("streak,claimed_on").eq("user_id",p.id).maybeSingle(),
@@ -62,19 +63,22 @@ async function bootstrap(p:any){
  db.from("ss_ledger").select("*").eq("user_id",p.id).order("created_at",{ascending:false}).limit(100),
  db.from("ss_orders").select("*").eq("user_id",p.id).order("created_at",{ascending:false}).limit(100),
  db.from("ss_tickets").select("*").eq("user_id",p.id).order("updated_at",{ascending:false}).limit(60),
- db.from("ss_purchases").select("*").eq("user_id",p.id).order("created_at",{ascending:false}).limit(60)
+ db.from("ss_purchases").select("*").eq("user_id",p.id).order("created_at",{ascending:false}).limit(100),
+ galaxyBootstrap(db,p.id)
  ]);
  for(const q of [wallet,progress,daily,settings,packages,announcements,ledger,orders,tickets,purchases])if(q.error)throw q.error;
  return {profile:p,balance:wallet.data?.balance||0,progress:progress.data,daily:daily.data,
  settings:settings.data,packages:packages.data,announcements:announcements.data,
- ledger:ledger.data,orders:orders.data,tickets:tickets.data,purchases:purchases.data,admin:await isAdmin(p.id)};
+ ledger:ledger.data,orders:orders.data,tickets:tickets.data,purchases:purchases.data,...galaxy,admin:await isAdmin(p.id)};
 }
 async function userAction(p:any,b:any){
+ if(galaxyActions.has(b.action))return await galaxyAction(db,p,b);
  switch(b.action){
  case "bootstrap":return await bootstrap(p);
  case "wallet":return requireOk(await db.from("ss_wallets").select("balance").eq("user_id",p.id).single());
   case "daily":return requireOk(await db.rpc("ss_claim_daily",{p_user:p.id}));
  case "start":{
+  if(b.protocol!=="galaxy-v1")fail("نسخهٔ بازی تغییر کرده است؛ صفحه را تازه‌سازی کنید.");
   const stage=Number(b.stage);
   if(!Number.isInteger(stage)||stage<1||stage>200)fail("مرحله نامعتبر است.");
   if(stage>1){
@@ -84,10 +88,13 @@ async function userAction(p:any,b:any){
   const recent=requireOk(await db.from("ss_runs").select("id").eq("user_id",p.id)
    .is("finished_at",null).gt("started_at",new Date(Date.now()-120000).toISOString()).limit(3));
   if((recent?.length||0)>=3)fail("تعداد نبردهای هم‌زمان زیاد است؛ کمی بعد دوباره تلاش کنید.");
-  const run=requireOk(await db.from("ss_runs").insert({user_id:p.id,stage}).select("id,started_at,stage").single());
-  return {...run,enemies:8+Math.min(12,Math.floor(stage/10))};
+  const loadout=requireOk(await db.rpc("ss_game_loadout",{p_user:p.id}));
+  const run=requireOk(await db.from("ss_runs").insert({user_id:p.id,stage,loadout}).select("id,started_at,stage").single());
+  return {...run,enemies:8+Math.min(12,Math.floor(stage/10)),loadout,seed:crypto.getRandomValues(new Uint32Array(1))[0]};
  }
  case "finish":{
+  const previous=requireOk(await db.from("ss_runs").select("loadout").eq("id",String(b.run)).eq("user_id",p.id).maybeSingle());
+  if(previous?.loadout?.protocol==="galaxy-v1")fail("نتیجهٔ نسخهٔ جدید باید از مسیر نبرد جدید ثبت شود.");
   const kills=Number(b.kills),score=Number(b.score),won=b.won===true;
   const hearts=Number(b.hearts),elapsed=Number(b.elapsed);
   if(!Number.isInteger(kills)||!Number.isInteger(score)||!Number.isInteger(hearts)
@@ -236,10 +243,14 @@ async function adminAction(p:any,b:any){
   return {saved:true};
  }
  case "adminPackage":{
-  const item:any={title:onlyString(b.title,90),description:onlyString(b.description,1000),coins:Number(b.coins),active:b.active!==false};
-  if(!item.title||!Number.isSafeInteger(item.coins)||item.coins<=0)fail("مشخصات بسته نامعتبر است.");
+  const item:any={title:onlyString(b.title,90),description:onlyString(b.description,1000),coins:Number(b.coins),active:b.active!==false,autopilot:b.autopilot||"none",auto_shield:b.auto_shield===true};
+  if(!["none","go","plus","pro"].includes(item.autopilot)||!item.title||!Number.isSafeInteger(item.coins)||item.coins<=0)fail("مشخصات بسته نامعتبر است.");
   if(b.id)item.id=b.id;
   return requireOk(await db.from("ss_packages").upsert(item).select().single());
+ }
+ case "adminGrantPackage":{
+  if(typeof b.package_id!=="string"||!/^([a-f0-9-]{36})$/i.test(b.package_id))fail("بسته نامعتبر است");
+  return {granted:requireOk(await db.rpc("ss_grant_package",{p_admin:p.id,p_package:b.package_id,p_username:onlyString(b.username,24).toLowerCase(),p_all:b.all===true}))};
  }
  case "adminNotice":{
   const item:any={title:onlyString(b.title,160),body:onlyString(b.body,5000),active:b.active!==false};

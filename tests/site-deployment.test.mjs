@@ -24,11 +24,12 @@ test("published HTML and recursive JavaScript imports exist in deployment artifa
   visited.add(path);
   const source=required(path);
   if(!path.endsWith(".js"))continue;
-  for(const m of source.matchAll(/\bfrom\s*["'](\.\/[^"']+\.js)["']|\bimport\s*["'](\.\/[^"']+\.js)["']/g)){
+  for(const m of source.matchAll(/\bfrom\s*["'](\.\/[^"'?]+\.js)(?:\?[^"']*)?["']|\bimport\s*(?:\(\s*)?["'](\.\/[^"'?]+\.js)(?:\?[^"']*)?["']/g)){
    const child=m[1]||m[2];
    stack.push(join(dirname(path),child));
   }
  }
+ for(const asset of ["game.js","game-core.js","galaxy-ui.js","realtime.js","supabase-client.js"])assert.ok(visited.has(asset),asset+" must be deployed");
  assert.ok(visited.has("jalali-calendar.js"),"Jalali calendar dependency must be deployed");
 });
 

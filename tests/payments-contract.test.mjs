@@ -29,8 +29,9 @@ test("Bale invoices below the confirmed 10000 IRR floor never reach provider",()
 test("startup and admin avoid redundant requests",()=>{
  const source=read("app.js"),server=read("supabase/functions/space-shooter-api/index.ts");
  assert.doesNotMatch(source,/\},500\)/);
- assert.match(source,/setInterval\(updateWallet,30000\)/);
- assert.match(source,/await import\("\.\/game\.js"\)/);
+ assert.match(read("realtime.js"),/watchAccount/);
+ assert.doesNotMatch(source,/setInterval\(updateWallet/);
+ assert.match(read("galaxy-ui.js"),/await import\('\.\/game\.js'\)/);
  assert.match(server,/pageQuery\(query\.is\("archived_at",null\)/);
 });
 
