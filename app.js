@@ -1,5 +1,7 @@
-import {createClient} from "https://esm.sh/@supabase/supabase-js@2.58.0?bundle";
-// The game engine loads only when a player starts a mission.
+import {createClient} from "./supabase-client.js";
+import {createGalaxyUI} from "./galaxy-ui.js";
+import {PILOTS} from "./game-core.js";
+// The renderer loads only when a player starts a mission.
 import {jalaliMonths,jalaliToday,jalaliMonthGrid,parseJalaliDate,formatJalaliDate,jalaliFromISO,jalaliToISO,shiftJalaliMonth} from "./jalali-calendar.js";
 const PROJECT="https://efibfevyiepkwpnobaro.supabase.co";
 const PUBLIC_KEY="sb_publishable_zbEGYX6DGhjFRQf6FWiIWQ_IdYj84nW";
@@ -10,14 +12,15 @@ const esc=value=>String(value??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;
 const num=n=>Number(n||0).toLocaleString("fa-IR");
 const normal=s=>String(s||"").replace(/[۰-۹]/g,c=>"۰۱۲۳۴۵۶۷۸۹".indexOf(c)).replace(/[٠-٩]/g,c=>"٠١٢٣٤٥٦٧٨٩".indexOf(c));
 const states={sent:"ارسال شده",review:"در حال بررسی",awaiting_user:"در انتظار پاسخ شما",closed:"بسته شده",closed_support:"بسته شده توسط پشتیبانی"};
-const navItems=[["home","⌂ خانه"],["levels","🚀 شروع بازی"],["shop","🛍 فروشگاه"],["daily","🎁 پاداش روزانه"],["support","🎫 پشتیبانی"],["buycoins","🪙 خرید سکه"],["ledger","📜 گردش سکه"],["orders","🧾 واریزی‌ها"]];
+const navItems=[["home","⌂ فرماندهی"],["levels","✦ مأموریت‌ها"],["shop","⬡ تجهیزات"],["daily","◇ پاداش روزانه"],["hangar","◈ آشیانه"],["friends","◎ دوستان"],["buycoins","🪙 خرید سکه"],["ledger","📜 گردش سکه"],["orders","🧾 واریزی‌ها"]];
 const state={session:null,data:null,view:"home",authTab:"login",chapter:1,adminTab:"users",adminPage:0,adminArchived:false,adminData:null,
  currentTicket:null,ticketDetails:null,editingUser:null,editingPackage:null,editingDiscount:null,gameStop:null,gameRun:null,gameStage:null,gameStats:null};
 let toastTimer;
+const galaxy=createGalaxyUI({state,client,$,esc,num,toast,call,refresh,navigate,setPage,chrome,render,dateFa});
 function toast(message,error=false){const t=$("#toast");t.textContent=String(message);t.className="show"+(error?" error":"");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.className="",5000);}
 function dateFa(d){if(!d)return "—";const parts=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(d));const get=x=>parts.find(p=>p.type===x)?.value||"";return get("hour")+":"+get("minute")+"  "+get("day")+"/"+get("month")+"/"+get("year");}
 function dayFa(d){return d?new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(d)):"—";}
-function formObj(form){const out=Object.fromEntries(new FormData(form).entries());for(const k in out)if(typeof out[k]==="string")out[k]=normal(out[k]).trim();return out;}
+function formObj(form){const out=Object.fromEntries(new FormData(form).entries());for(const k in out)if(typeof out[k]==="string"&&!k.startsWith("password"))out[k]=normal(out[k]).trim();return out;}
 
 function closeDiscountCalendars(){
  document.querySelectorAll(".jalali-popup").forEach(p=>p.hidden=true);
@@ -68,7 +71,7 @@ function setPage(html){$("#app").innerHTML=html;$("#app").focus({preventScroll:t
 async function call(action,payload={}){
  const token=state.session?.access_token;
  let res;
- try{res=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","apikey":PUBLIC_KEY,...(token?{"Authorization":"Bearer "+token}:{})},body:JSON.stringify({action,...payload})});}
+ try{res=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","apikey":PUBLIC_KEY,...(token?{"Authorization":"Bearer "+token}:{})},signal:AbortSignal.timeout(20000),body:JSON.stringify({...payload,action})});}
  catch{throw Error("اتصال به سرور بازی برقرار نشد. انتشار Edge Function را بررسی کنید.");}
  const out=await res.json().catch(()=>({ok:false,error:"پاسخ نامعتبر از سرور"}));
  if(!res.ok||!out.ok)throw Error(out.error||"درخواست ناموفق بود.");
@@ -77,26 +80,15 @@ async function call(action,payload={}){
 async function init(){
  const {data:{session}}=await client.auth.getSession();state.session=session;
  if(session){await refresh(true);}else renderAuth();
- client.auth.onAuthStateChange((_event,s)=>{state.session=s;if(!s){state.data=null;state.adminData=null;if(state.gameStop)state.gameStop();state.gameStop=null;renderAuth();}});
- let walletRefreshInFlight=false;
- const updateWallet=async()=>{
-  if(walletRefreshInFlight||!state.session||!state.data||state.view==="game"||document.hidden)return;
-  walletRefreshInFlight=true;
-  try{
-   const data=await call("wallet");
-   if(data&&state.data){state.data.balance=data.balance;const el=$("#coinbalance");if(el)el.textContent=num(data.balance);}
-  }catch(e){console.warn("Wallet refresh deferred",e);}
-  finally{walletRefreshInFlight=false;}
- };
- setInterval(updateWallet,30000);
- document.addEventListener("visibilitychange",()=>{if(!document.hidden)updateWallet();});
+ client.auth.onAuthStateChange((_event,s)=>{state.session=s;if(!s){state.data=null;state.adminData=null;state.currentTicket=null;state.ticketDetails=null;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;if(state.gameStop)state.gameStop();state.gameStop=null;galaxy.disconnect();renderAuth();}});
+ await galaxy.connect();
 }
 async function refresh(claim=false){
  if(!state.session)return;
  try{
   if(claim){try{const r=await call("daily");const item=Array.isArray(r)?r[0]:r;if(item?.reward>0)toast("🎁 پاداش ورود امروز: "+num(item.reward)+" سکه");}catch(e){console.warn("Daily reward not claimed",e);}}
   state.data=await call("bootstrap");
-  render();
+  render();await galaxy.connect();
  }catch(e){setPage('<div class="surface"><h2>خطا در اتصال به حساب</h2><p>'+esc(e.message)+'</p><button class="button" data-action="refresh">تلاش دوباره</button></div>');}
 }
 function chrome(){
@@ -108,8 +100,9 @@ function chrome(){
  const nav=$("#nav");nav.hidden=!logged||state.view==="game";
  nav.innerHTML=navItems.map(([id,title])=>'<button data-nav="'+id+'" class="'+(state.view===id?"active":"")+'">'+title+'</button>').join("")+(state.data?.admin?'<button data-nav="admin" class="'+(state.view==="admin"?"active":"")+'">⚙ مدیریت</button>':"");
  $("#notice-area").innerHTML=state.view!=="game"&&logged?(state.data.announcements||[]).map(n=>'<div class="notice"><b>📢 '+esc(n.title)+'</b><p>'+esc(n.body)+'</p></div>').join(""):"";
+ galaxy.updateChrome();
 }
-function navigate(to){if(state.gameStop&&state.view==="game"){state.gameStop();state.gameStop=null;state.gameRun=null;}state.view=to;window.scrollTo({top:0,behavior:"instant"});render();}
+function navigate(to){if(state.gameStop&&state.view==="game"){galaxy.leave();return;}state.view=to;window.scrollTo({top:0,behavior:"instant"});render();}
 function render(){
  chrome();
  if(!state.session)return renderAuth();
@@ -120,7 +113,8 @@ function render(){
   case "levels":return renderLevels();
   case "shop":return renderShop();
   case "daily":return renderDaily();
-  case "support":return renderSupport();
+  case "hangar":return galaxy.renderHangar();
+  case "friends":return galaxy.renderFriends();
   case "buycoins":return renderBuy();
   case "ledger":return renderLedger();
   case "orders":return renderOrders();
@@ -138,30 +132,27 @@ function renderAuth(){
  '</section></div>');
 }
 function renderHome(){
- const completed=(state.data.progress||[]).filter(x=>x.cleared&&x.best_score>=75).length;
- const p=state.data.profile;
- setPage('<div class="hero"><div class="hero-copy"><div class="eyebrow">MISSION CONTROL · '+esc(p.username.toUpperCase())+'</div><h1>به <span class="gradient">کهکشان</span> خوش آمدی، '+esc(p.first_name)+'!</h1><p>سفینه دشمنان را نابود کن؛ برای هر دشمن ۱۰ سکه و در اولین پیروزی هر مرحله، برای هر امتیاز ۲ سکه دریافت می‌کنی.</p><div class="buttons"><button class="button" data-nav="levels">🚀 شروع بازی</button><button class="ghost" data-nav="shop">🛍 فروشگاه</button></div><div class="stats"><div class="stat"><strong>'+num(completed)+'/۲۰۰</strong><span>مراحل تکمیل‌شده</span></div><div class="stat"><strong>'+num(state.data.balance)+' 🪙</strong><span>موجودی سکه</span></div><div class="stat"><strong>۵ ❤️</strong><span>قلب در هر بازی</span></div></div></div><div class="hero-art"><div class="planet"></div><div class="ship">🚀</div><span class="mini-spark one">✦</span><span class="mini-spark two">✧</span></div></div>'+
- '<div class="section-head"><div><h2>مرکز فرماندهی</h2><p>همه قابلیت‌های بازی در یک نگاه</p></div></div><div class="cards">'+
- [["🚀","شروع بازی","۲۰۰ مرحله در ۲۰ فصل؛ امتیاز ۷۵ برای گشودن مرحله بعد","levels"],
- ["🛍","فروشگاه","دریافت بسته‌ها با سکه موجود در کیف پول","shop"],
- ["🎁","پاداش روزانه","روز اول ۱۰۰ سکه و هر روز متوالی ۱۰۰ سکه بیشتر","daily"],
- ["🎫","پشتیبانی","ثبت و پیگیری تیکت و ارسال فایل","support"],
- ["🪙","خرید سکه","خرید از طریق بازوی رسمی بله و تأیید پرداخت","buycoins"],
- ["📜","گردش سکه‌های من","ریز تمام دریافتی‌ها و برداشت‌ها","ledger"],
- ["🧾","واریزی‌های خرید سکه","مشاهده سفارش‌ها و وضعیت واریز","orders"]
- ].map(([icon,title,desc,nav])=>'<article class="card"><span class="emoji">'+icon+'</span><h3>'+title+'</h3><p>'+desc+'</p><button class="button small" data-nav="'+nav+'">مشاهده</button></article>').join("")+'</div>');
+ const progress=state.data.progress||[],completed=progress.filter(x=>x.cleared&&x.best_score>=75).length,p=state.data.profile;
+ const next=Math.min(200,completed+1),chapter=Math.ceil(next/10),pilot=PILOTS[state.data.loadout?.autopilot||'none'].name;
+ setPage('<section class="command-hero"><div class="hero-copy"><div class="eyebrow"><span class="online-dot"></span> GALAXY COMMAND / SEASON 01</div><p class="commander">خوش آمدی، فرمانده '+esc(p.first_name)+'</p><h1>مرزهای کهکشان<br><em>منتظر تو هستند.</em></h1><p>از اولین پرواز تا نبرد با فرماندهٔ نهایی؛ ناوگانت را بساز، منابع استخراج کن و این بار با یک دوست به میدان برو.</p><div class="buttons"><button class="button" data-nav="levels">شروع مأموریت <span>↗</span></button><button class="ghost" data-nav="friends">◎ بازی دونفره</button></div><div class="hero-tags"><span>۲۰۰ مأموریت</span><span>۲۰ باس چندفازی</span><span>ناوگان اختصاصی</span></div></div><div class="fleet-visual" aria-hidden="true"><div class="orbit-ring first"></div><div class="orbit-ring second"></div><span class="coordinate top">SECTOR 07.24 / 2049</span><svg class="fleet-ship" viewBox="0 0 500 500"><defs><linearGradient id="hull" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d4ebe7"/><stop offset=".5" stop-color="#59758b"/><stop offset="1" stop-color="#182b42"/></linearGradient><linearGradient id="jet" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#b8fff0"/><stop offset="1" stop-color="#57d6c3" stop-opacity="0"/></linearGradient></defs><path d="M220 350 238 475 260 348Z" fill="url(#jet)"/><path d="M282 350 300 455 315 348Z" fill="url(#jet)"/><path d="m250 45 38 160 118 133-9 32-117-42-30 40-30-40-117 42-9-32 118-133z" fill="url(#hull)" stroke="#a4ccc7" stroke-width="2"/><path d="m250 50-2 277-27-51 5-84z" fill="#c2d8d9"/><path d="m250 112 20 111-20 48-18-48z" fill="#0c2435" stroke="#83e4d5" stroke-width="3"/><path d="m211 222-80 107 85-38m73-69 80 107-85-38" fill="#1c364b" stroke="#88b4b5" stroke-width="2"/><path d="m155 306 48-53m142 53-48-53" stroke="#e6c588" stroke-width="6"/><path d="m224 329 13 22m39-22-13 22" stroke="#a5ffdf" stroke-width="9"/></svg><div class="ship-label"><span class="online-dot"></span> INTERCEPTOR — MK.IV <small>آمادهٔ پرواز</small></div><span class="coordinate bottom">SYSTEMS ONLINE / 100%</span></div></section><div class="mission-overview"><article><span class="overview-icon">✦</span><div><small>مسیر پیشروی</small><strong>'+num(completed)+' <span>/ ۲۰۰ مأموریت</span></strong><div class="progress-track"><i style="width:'+completed/2+'%"></i></div></div></article><article><span class="overview-icon">◈</span><div><small>خلبان خودکار</small><strong class="pilot-name">'+esc(pilot)+'</strong><span class="hint">'+(state.data.loadout?.auto_shield?'سپر خودکار فعال':'قابل ارتقا در فروشگاه')+'</span></div></article><article><span class="overview-icon">◎</span><div><small>مأموریت بعدی</small><strong>مرحلهٔ '+num(next)+' <span>فصل '+num(chapter)+'</span></strong><span class="hint">'+(next%10===0?'هشدار: باس فصل در انتظار توست':'ناحیهٔ جدید را پاک‌سازی کن')+'</span></div></article></div><div class="section-head"><div><div class="eyebrow">YOUR NEXT MOVE</div><h2>فرماندهی با توست.</h2></div><span class="hint">سفینهٔ بهتر، نبردهای بزرگ‌تر</span></div><div class="command-grid">'+[
+ ['01','◈','آشیانهٔ سفینه','پهپاد بخر، منابع را به قطعات تبدیل کن و قدرت سفینه را بالا ببر.','hangar','mint'],
+ ['02','◎','ناوگان دوستان','درخواست دوستی بفرست و با تأیید هم‌تیمی وارد نبرد مشترک شو.','friends','violet'],
+ ['03','⬡','تجهیزات پیشرفته','خلبان خودکار Go، Plus و Pro و سپر خودکار را از بسته‌ها فعال کن.','shop','amber']
+ ].map(([n,icon,title,text,nav,color])=>'<article class="command-card '+color+'"><div class="command-card-top"><span>'+icon+'</span><small>/ '+n+'</small></div><h3>'+title+'</h3><p>'+text+'</p><button data-nav="'+nav+'" class="card-link">ورود به بخش <span>←</span></button></article>').join('')+'</div><div class="daily-banner"><div><span class="eyebrow">DAILY SIGNAL</span><h3>هر روز، یک قدم جلوتر.</h3><p>پاداش ورود متوالی را دریافت کن و برای مأموریت بعد آماده شو.</p></div><button class="ghost" data-nav="daily">بررسی پاداش روزانه ←</button></div>');
 }
 function unlocked(stage){if(stage===1)return true;const prior=(state.data.progress||[]).find(x=>x.stage===stage-1);return !!prior?.cleared&&prior.best_score>=75;}
 function renderLevels(){
  const ch=state.chapter,base=(ch-1)*10;
  setPage('<div class="section-head"><div><div class="eyebrow">GALACTIC MISSIONS</div><h2>مراحل نبرد</h2><p>۲۰ فصل × ۱۰ مرحله | برای باز شدن هر مرحله، مرحله قبل باید با امتیاز حداقل ۷۵ تمام شود.</p></div><span class="chip">فصل '+num(ch)+' از ۲۰</span></div><div class="chapterbar">'+Array.from({length:20},(_,i)=>'<button class="ghost '+(ch===i+1?"selected":"")+'" data-action="chapter" data-id="'+(i+1)+'">فصل '+num(i+1)+'</button>').join("")+'</div><div class="surface"><div class="levels">'+Array.from({length:10},(_,i)=>{
   const n=base+i+1,p=(state.data.progress||[]).find(p=>p.stage===n),ok=unlocked(n);
-  return '<button class="level '+(!ok?"locked":p?.cleared?"cleared":"")+'" data-action="start-level" data-id="'+n+'" '+(!ok?"disabled":"")+'><b>'+(ok?(p?.cleared?"★":"🚀"):"🔒")+' '+num(n)+'</b><span>'+(p?.cleared?"بهترین امتیاز: "+num(p.best_score):ok?"آماده نبرد":"قفل")+'</span></button>';
+  return '<button class="level '+(n%10===0?'boss-level ':'')+(!ok?"locked":p?.cleared?"cleared":"")+'" data-action="start-level" data-id="'+n+'" '+(!ok?"disabled":"")+'><b>'+(ok?(p?.cleared?"★":"🚀"):"🔒")+' '+num(n)+'</b><span>'+(p?.cleared?"بهترین امتیاز: "+num(p.best_score):ok?(n%10===0?"باس فصل · پاداش ویژه":"آماده نبرد"):"قفل")+'</span></button>';
  }).join("")+'</div></div><p class="hint">هر بار بازی ۵ قلب داری. رادار گوشه صفحه جای دشمنان و سفینه را نشان می‌دهد. پاداش سکه فقط یک‌بار، در اولین پیروزی موفق هر مرحله، پرداخت می‌شود.</p>');
 }
+function hasPackage(p){return (p.autopilot!=="none"||p.auto_shield)&&[...(state.data.purchases||[]),...(state.data.grants||[])].some(x=>x.package_id===p.id);}
+function packageFeatures(p){return (p.autopilot&&p.autopilot!=="none"?'<span class="chip">'+esc(PILOTS[p.autopilot]?.name)+'</span>':"")+(p.auto_shield?'<span class="chip">◈ سپر خودکار</span>':"");}
 function renderShop(){
- setPage('<div class="section-head"><div><div class="eyebrow">IN-GAME STORE</div><h2>🛍 فروشگاه</h2><p>موجودی فعلی: '+num(state.data.balance)+' سکه</p></div><button class="button gold" data-nav="buycoins">+ خرید سکه</button></div>'+
- ((state.data.packages||[]).length?'<div class="cards">'+state.data.packages.map(p=>'<article class="card"><span class="emoji">📦</span><h3>'+esc(p.title)+'</h3><p>'+esc(p.description)+'</p><p><span class="chip">'+num(p.coins)+' 🪙</span></p><button class="button gold" data-action="buy-package" data-id="'+esc(p.id)+'" '+(state.data.balance<p.coins?"disabled":"")+'>'+(state.data.balance<p.coins?"سکه کافی نیست":"خرید بسته")+'</button></article>').join("")+'</div>':'<div class="surface empty">هنوز هیچ بسته‌ای توسط مدیر ثبت نشده است.</div>'));
+ setPage('<div class="section-head"><div><div class="eyebrow">IN-GAME STORE</div><h2>🛍 فروشگاه</h2><p>موجودی فعلی: '+num(state.data.balance)+' سکه · امکانات بسته پس از خرید در تمام نبردها فعال است.</p></div><button class="button gold" data-nav="buycoins">+ خرید سکه</button></div>'+
+ ((state.data.packages||[]).length?'<div class="cards">'+state.data.packages.map(p=>'<article class="card"><span class="emoji">📦</span><h3>'+esc(p.title)+'</h3><p>'+esc(p.description)+'</p><p>'+packageFeatures(p)+' </p><p><span class="chip">'+num(p.coins)+' 🪙</span></p><button class="button gold" data-action="buy-package" data-id="'+esc(p.id)+'" '+(state.data.balance<p.coins||hasPackage(p)?"disabled":"")+'>'+(hasPackage(p)?"✓ دریافت شده":state.data.balance<p.coins?"سکه کافی نیست":"خرید بسته")+'</button></article>').join("")+'</div>':'<div class="surface empty">هنوز هیچ بسته‌ای توسط مدیر ثبت نشده است.</div>'));
 }
 function renderDaily(){
  const streak=state.data.daily?.streak||0;const claimed=state.data.daily?.claimed_on;
@@ -177,23 +168,17 @@ function renderLedger(){
  setPage('<div class="section-head"><div><div class="eyebrow">WALLET HISTORY</div><h2>📜 گردش سکه‌های من</h2><p>تمام واریزها و برداشت‌ها با تاریخ و ساعت شمسی</p></div><button class="ghost" data-action="open-bale">ورود به بازو</button></div><div class="surface scroll"><table><thead><tr><th>زمان</th><th>شرح</th><th>نوع</th><th>تعداد سکه</th></tr></thead><tbody>'+
  (rows.length?rows.map(x=>'<tr><td>'+dateFa(x.created_at)+'</td><td>'+esc(reason(x.reason))+'</td><td>'+ (x.delta>0?"واریز":"برداشت")+'</td><td style="color:'+(x.delta>0?"#53e3ae":"#ff9aab")+'">'+(x.delta>0?"+":"−")+num(Math.abs(x.delta))+'</td></tr>').join(""):'<tr><td colspan="4" class="empty">تراکنشی وجود ندارد.</td></tr>')+'</tbody></table></div>');
 }
-function reason(key){return ({daily:"پاداش روزانه",first_clear:"اولین پیروزی مرحله",package:"خرید بسته فروشگاه",bale_purchase:"خرید سکه در بله",admin_adjustment:"اصلاح موجودی توسط مدیر"})[key]||key;}
+function reason(key){return ({daily:"پاداش روزانه",first_clear:"اولین پیروزی مرحله",package:"خرید بسته فروشگاه",bale_purchase:"خرید سکه در بله",admin_adjustment:"اصلاح موجودی توسط مدیر",drone:"خرید پهپاد",mission_bonus:"پاداش باس و آیتم‌های نبرد"})[key]||key;}
 function renderOrders(){
  const rows=state.data.orders||[];
  setPage('<div class="section-head"><div><div class="eyebrow">PAYMENT RECORDS</div><h2>🧾 واریزی‌ها برای خرید سکه</h2><p>آخرین سفارش‌های پرداخت در بله</p></div></div><div class="surface scroll"><table><thead><tr><th>شماره سفارش</th><th>تاریخ</th><th>مبلغ (ریال)</th><th>تعداد سکه</th><th>وضعیت</th></tr></thead><tbody>'+
  (rows.length?rows.map(x=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+dateFa(x.created_at)+'</td><td>'+num(x.amount_rial)+'</td><td>'+num(x.coins)+'</td><td><span class="tag '+(x.status==="paid"?"paid":"pending")+'">'+(x.status==="paid"?"واریز شده":x.status==="failed"?"عدم خریداری":x.precheckout_tx?"در حال بررسی پرداخت":"در انتظار آغاز پرداخت")+'</span></td></tr>').join(""):'<tr><td colspan="5" class="empty">سفارشی ثبت نشده است.</td></tr>')+'</tbody></table></div>');
 }
-function renderSupport(){
- const tickets=state.data.tickets||[];
- if(state.currentTicket&&state.ticketDetails)return renderTicket();
- setPage('<div class="section-head"><div><div class="eyebrow">MISSION SUPPORT</div><h2>🎫 پشتیبانی</h2><p>ثبت تیکت با امکان بارگذاری فایل تا ۳۰ مگابایت، یا سقف ویژه تعیین‌شده توسط مدیر</p></div></div><div class="two-col"><section class="surface"><h3>ثبت تیکت جدید</h3><form id="new-ticket"><div class="field"><label>عنوان موضوع</label><input name="subject" maxlength="160" required></div><div class="field"><label>شرح مشکل</label><textarea name="message" required></textarea></div><div class="field"><label>فایل پیوست اختیاری (تا ۳۰ مگابایت)</label><input type="file" name="attachment"></div><button class="button" type="submit">ارسال تیکت</button></form></section><section class="surface"><h3>تیکت‌های من</h3>'+
- (tickets.length?tickets.map(t=>'<div class="ticket-message"><b>'+esc(t.subject)+'</b><p><span class="tag">'+esc(states[t.status]||t.status)+'</span> • '+dateFa(t.updated_at)+'</p><button class="ghost small" data-action="open-ticket" data-id="'+t.id+'">مشاهده و پاسخ</button></div>').join(""):'<div class="empty">تیکتی ثبت نشده است.</div>')+'</section></div>');
-}
 function renderTicket(){
  const t=state.ticketDetails.ticket,m=state.ticketDetails.messages,admin=!!state.data.admin;
- setPage('<div class="section-head"><div><h2>🎫 '+esc(t.subject)+'</h2><p>شماره تیکت: <code>'+esc(t.id)+'</code> · '+esc(states[t.status]||t.status)+'</p></div><button class="ghost" data-action="back-tickets">بازگشت</button></div><section class="surface"><h3>گفتگو با پشتیبانی</h3>'+
+ setPage('<div class="section-head"><div><h2>🎫 '+esc(t.subject)+'</h2><p>شماره تیکت: <code>'+esc(t.id)+'</code> · '+esc(states[t.status]||t.status)+'</p></div><button class="ghost" data-action="back-tickets">بازگشت</button></div><section class="surface"><h3>گفتگو با پشتیبانی</h3><div id="admin-chat-thread">'+
  (m.length?m.map(x=>'<div class="ticket-message '+(x.author_id===state.data.profile.id?"owner":"")+'"><div class="hint">'+dateFa(x.created_at)+'</div><div>'+esc(x.message)+'</div>'+(x.attachment_path?'<button class="ghost small" data-action="ticket-file" data-path="'+esc(x.attachment_path)+'">📎 دانلود فایل</button>':"")+'</div>').join(""):'<p>هنوز پیامی ثبت نشده است.</p>')+
- (["closed","closed_support"].includes(t.status)&&!admin?'<p>تیکت بسته شده است.</p>':'<hr><form id="reply-ticket"><div class="field"><label>پاسخ</label><textarea name="message" placeholder="پاسخ خود را بنویسید"></textarea></div><div class="field"><label>فایل پیوست (سقف '+num(Math.floor(t.file_limit/1048576))+' مگابایت)</label><input type="file" name="attachment"></div><button class="button" type="submit">ارسال پاسخ</button></form>')+
+ '</div>'+(["closed","closed_support"].includes(t.status)&&!admin?'<p>تیکت بسته شده است.</p>':'<hr><form id="reply-ticket"><div class="field"><label>پاسخ</label><textarea name="message" placeholder="پاسخ خود را بنویسید"></textarea></div><div class="field"><label>فایل پیوست (سقف '+num(Math.floor(t.file_limit/1048576))+' مگابایت)</label><input type="file" name="attachment"></div><button class="button" type="submit">ارسال پاسخ</button></form>')+
  (admin?'<hr><h3>ابزار مدیر تیکت</h3><form id="admin-ticket"><input type="hidden" name="id" value="'+esc(t.id)+'"><div class="formgrid"><div class="field"><label>وضعیت</label><select name="status">'+Object.entries(states).map(([key,label])=>'<option value="'+key+'" '+(t.status===key?"selected":"")+'>'+label+'</option>').join("")+'</select></div><div class="field"><label>حداکثر پیوست (مگابایت؛ حداکثر ۵۰)</label><input type="number" name="file_mb" min="0" max="50" value="'+Math.floor(t.file_limit/1048576)+'"></div></div><button class="button small" type="submit">ثبت تغییرات</button></form>':"")+'</section>');
 }
 async function openTicket(id){
@@ -221,7 +206,7 @@ function renderOrderManagement(a){
 function renderAdmin(){
  if(!state.adminData){setPage('<div class="loading"><div class="orbit"></div><h3>بارگذاری پنل مدیریت…</h3></div>');call("adminData",{tab:state.adminTab,page:state.adminPage,archived:state.adminArchived}).then(x=>{state.adminData=x;renderAdmin();}).catch(e=>setPage('<div class="surface">خطای پنل: '+esc(e.message)+'</div>'));return;}
  const t=state.adminTab,a=state.adminData;
- const tabs=[["users","کاربران"],["packages","بسته‌ها"],["discounts","تخفیف‌ها"],["notices","اطلاعیه‌ها"],["tickets","تیکت‌ها"],["orders","سفارش‌ها"],["settings","تنظیمات و توکن‌ها"]];
+ const tabs=[["users","کاربران"],["packages","بسته‌ها"],["discounts","تخفیف‌ها"],["notices","اطلاعیه‌ها"],["tickets","گفت‌وگوهای پشتیبانی"],["orders","سفارش‌ها"],["settings","تنظیمات و توکن‌ها"]];
  const isPaged=["users","tickets","orders"].includes(t);
  let body="";
  if(t==="users"){
@@ -236,8 +221,9 @@ function renderAdmin(){
  }
  if(t==="packages"){
   const p=a.packages.find(x=>x.id===state.editingPackage);
-  body='<div class="two-col"><section class="surface"><h3>ثبت / ویرایش بسته</h3><form id="admin-package">'+(p?'<input name="id" type="hidden" value="'+esc(p.id)+'">':"")+'<div class="field"><label>نام بسته</label><input name="title" value="'+esc(p?.title||"")+'" required></div><div class="field"><label>توضیحات</label><textarea name="description">'+esc(p?.description||"")+'</textarea></div><div class="field"><label>هزینه سکه</label><input name="coins" type="number" min="1" value="'+esc(p?.coins||"")+'" required></div><div class="field"><label><input name="active" type="checkbox" '+(p?.active!==false?"checked":"")+'> فعال باشد</label></div><button type="submit" class="button">ذخیره بسته</button> <button type="button" class="ghost" data-action="new-package">بسته جدید</button></form></section><section class="surface"><h3>بسته‌های ثبت‌شده</h3>'+a.packages.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b> · '+num(x.coins)+' سکه · '+(x.active?"فعال":"غیرفعال")+' <button class="ghost small" data-action="edit-package" data-id="'+x.id+'">ویرایش</button></div>').join("")+'</section></div>';
+  body='<div class="two-col"><section class="surface"><h3>ثبت / ویرایش بسته</h3><form id="admin-package">'+(p?'<input name="id" type="hidden" value="'+esc(p.id)+'">':"")+'<div class="field"><label>نام بسته</label><input name="title" value="'+esc(p?.title||"")+'" required></div><div class="field"><label>توضیحات</label><textarea name="description">'+esc(p?.description||"")+'</textarea></div><div class="field"><label>هزینه سکه</label><input name="coins" type="number" min="1" value="'+esc(p?.coins||"")+'" required></div><div class="field"><label>خلبان خودکار</label><select name="autopilot">'+Object.entries(PILOTS).map(([key,value])=>'<option value="'+key+'" '+((p?.autopilot||'none')===key?'selected':'')+'>'+esc(value.name)+(key==='go'?' · مبتدی':key==='plus'?' · متوسط':key==='pro'?' · حرفه‌ای':'')+'</option>').join('')+'</select></div><div class="field"><label><input type="checkbox" name="auto_shield" '+(p?.auto_shield?'checked':'')+'> سپر خودکار برای این بسته فعال شود</label></div><div class="field"><label><input name="active" type="checkbox" '+(p?.active!==false?"checked":"")+'> فعال باشد</label></div><button type="submit" class="button">ذخیره بسته</button> <button type="button" class="ghost" data-action="new-package">بسته جدید</button></form></section><section class="surface"><h3>بسته‌های ثبت‌شده</h3>'+a.packages.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b> · '+num(x.coins)+' سکه · '+packageFeatures(x)+' · '+(x.active?"فعال":"غیرفعال")+' <button class="ghost small" data-action="edit-package" data-id="'+x.id+'">ویرایش</button></div>').join("")+'</section></div>';
  }
+ if(t==="packages")body+='<section class="surface"><h3>اختصاص بسته به کاربران</h3><p>بدون برداشت سکه، قابلیت‌های بسته برای حساب انتخاب‌شده فعال می‌شوند.</p><form id="grant-package"><div class="formgrid"><div class="field"><label>بسته</label><select name="package_id" required>'+a.packages.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.title)+'</option>').join('')+'</select></div><div class="field"><label>نام کاربری دریافت‌کننده</label><input name="username" pattern="[A-Za-z0-9_]{3,24}" dir="ltr"></div></div><div class="field"><label><input type="checkbox" name="all"> اختصاص به همهٔ کاربران فعال</label></div><button type="submit" class="button small">اختصاص بسته</button></form></section>';
  if(t==="discounts"){
   const d=a.discounts.find(x=>x.code===state.editingDiscount);
   const start=jalaliFromISO(d?.valid_from),end=jalaliFromISO(d?.valid_until);
@@ -254,28 +240,17 @@ function renderAdmin(){
  if(t==="notices"){
   body='<div class="two-col"><section class="surface"><h3>اطلاعیه جدید</h3><form id="admin-notice"><div class="field"><label>موضوع</label><input name="title" required></div><div class="field"><label>شرح اطلاعیه</label><textarea name="body" required></textarea></div><button class="button" type="submit">انتشار اطلاعیه</button></form></section><section class="surface"><h3>اطلاعیه‌ها</h3>'+a.announcements.map(x=>'<div class="ticket-message"><b>'+esc(x.title)+'</b><p>'+esc(x.body)+'</p><small>'+dateFa(x.created_at)+'</small></div>').join("")+'</section></div>';
  }
- if(t==="tickets")body='<div class="surface"><h3>تیکت‌های کاربران</h3>'+a.tickets.map(x=>'<div class="ticket-message"><b>'+esc(x.subject)+'</b><p>کاربر: '+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+' · '+esc(states[x.status]||x.status)+' · '+dateFa(x.updated_at)+'</p><button class="ghost small" data-action="open-ticket" data-id="'+x.id+'">بررسی و پاسخ</button></div>').join("")+'</div>';
+ if(t==="tickets")body='<div class="surface"><h3>گفت‌وگوهای کاربران</h3>'+a.tickets.map(x=>'<div class="ticket-message"><b>'+esc(x.subject)+'</b><p>کاربر: '+esc(a.users.find(u=>u.id===x.user_id)?.username||"—")+' · '+esc(states[x.status]||x.status)+' · '+dateFa(x.updated_at)+'</p><button class="ghost small" data-action="open-ticket" data-id="'+x.id+'">بررسی و پاسخ</button></div>').join("")+'</div>';
  if(t==="orders")body=renderOrderManagement(a);
  if(t==="settings")body='<section class="surface"><h3>تنظیمات بازو و قیمت سکه</h3><p>توکن‌ها فقط برای سرور ارسال می‌شوند و به مرورگر کاربران برنمی‌گردند. در کادر توکن خالی بگذارید تا مقدار قبلی حفظ شود.</p><form id="admin-settings"><div class="formgrid"><div class="field"><label>قیمت هر سکه (ریال؛ صفر یعنی فروش متوقف)</label><input name="price_rial_per_coin" type="number" min="0" value="'+esc(a.settings.price_rial_per_coin)+'" required></div><div class="field"><label>لینک رسمی بازوی بله (https://ble.ir/...)</label><input name="bale_url" type="url" value="'+esc(a.settings.bale_url)+'"></div><div class="field"><label>توکن بازوی بله '+(a.tokens.includes("bot_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="bot_token" type="password" autocomplete="off"></div><div class="field"><label>توکن کیف پول بله '+(a.tokens.includes("provider_token")?"✅ ثبت شده":"⚠️ تنظیم نشده")+'</label><input name="provider_token" type="password" autocomplete="off"></div></div><button class="button" type="submit">ذخیره و تنظیم Webhook</button></form><p class="hint">قبل از تنظیم توکن، هر دو تابع Edge باید منتشر شده باشند.</p></section>';
  setPage('<div class="section-head"><div><div class="eyebrow">ADMIN COMMAND CENTER</div><h2>⚙ پنل مدیریت</h2><p>کاربران: '+num(a.users.length)+' · تیکت‌ها: '+num(a.tickets.length)+' · سفارش‌ها: '+num(a.orders.length)+'</p></div><button class="ghost small" data-action="admin-refresh">↻ بروزرسانی</button></div><div class="admin-nav">'+tabs.map(([key,title])=>'<button class="ghost '+(t===key?"selected":"")+'" data-action="admin-tab" data-id="'+key+'">'+title+'</button>').join("")+'</div>'+body+(isPaged?'<div class="admin-pagination"><button type="button" class="ghost small" data-action="admin-page" data-step="-1" '+(state.adminPage===0?'disabled':'')+'>صفحه قبل</button><span>صفحه '+num(state.adminPage+1)+'</span><button type="button" class="ghost small" data-action="admin-page" data-step="1" '+(!a.hasMore?'disabled':'')+'>صفحه بعد</button></div>':""));
  if(t==="discounts"){syncDiscountDateFields($("#admin-discount"));syncDiscountValueField($("#admin-discount"));}
 }
+let startingMission=false;
 async function startLevel(stage){
- try{
-  const run=await call("start",{stage});state.gameRun=run;state.gameStage=stage;state.view="game";
-  chrome();
-  setPage('<div class="game-wrap"><div class="game-head"><div><span class="eyebrow">SPACE BATTLE</span><h2>نبرد مرحله '+num(stage)+'</h2></div><div class="game-metrics"><span class="metric" id="hearts">❤️❤️❤️❤️❤️</span><span class="metric" id="kills">دشمن: ۰ / '+num(run.enemies)+'</span><button class="ghost small" data-action="leave-game">خروج از نبرد</button></div></div><canvas id="battle" width="900" height="540" aria-label="زمین نبرد"></canvas><p class="game-instructions">🕹 با موس، لمس صفحه یا کلیدهای جهت‌نما و WASD حرکت کن. شلیک خودکار است. با P بازی را متوقف کن. رادار بالا-چپ در نمای روی صفحه انگلیسی سمت راست قرار دارد.</p></div>');
-  const {startShooter}=await import("./game.js");
-  state.gameStop=startShooter($("#battle"),{stage,count:run.enemies,onProgress:o=>{$("#hearts").textContent="❤️".repeat(o.hearts)+"🖤".repeat(5-o.hearts);$("#kills").textContent="دشمن: "+num(o.kills)+" / "+num(run.enemies);},onEnd:async result=>{
-   state.gameStop=null;
-   setPage('<div class="loading"><div class="orbit"></div><h2>در حال ثبت نتیجه نبرد…</h2></div>');
-   try{
-    const r=await call("finish",{run:run.id,...result});const outcome=Array.isArray(r)?r[0]:r;
-    await refresh(false);state.view="result";chrome();
-    setPage('<div class="surface" style="max-width:630px;margin:45px auto;text-align:center"><div style="font-size:60px">'+(result.won?"🏆":"💥")+'</div><h2>'+(result.won?"نبرد تمام شد!":"سفینه نابود شد")+'</h2><p>مرحله '+num(stage)+' · امتیاز '+num(result.score)+' / ۱۰۰ · دشمنان نابودشده: '+num(result.kills)+'</p><h3>سکه دریافتی: <span style="color:#ffdc83">'+num(outcome?.reward||0)+'</span> 🪙</h3><p>'+(outcome?.unlocked?"مرحله بعدی باز شد!":result.won?"برای باز شدن مرحله بعد باید امتیاز ۷۵ یا بیشتر کسب کنی.":"این بار سکه‌ای دریافت نمی‌شود.")+'</p><div class="buttons" style="justify-content:center"><button class="button" data-nav="levels">مراحل بازی</button><button class="ghost" data-action="retry-level" data-id="'+stage+'">تلاش دوباره</button></div></div>');
-   }catch(e){state.view="result";chrome();setPage('<div class="surface"><h2>ثبت نتیجه ناموفق بود</h2><p>'+esc(e.message)+'</p><button class="button" data-nav="levels">بازگشت</button></div>');}
-  }});
- }catch(e){toast(e.message,true);}
+ if(startingMission||state.view==='game')return;startingMission=true;
+ try{const run=await call('start',{stage,protocol:'galaxy-v1'});await galaxy.play(run);}
+ catch(e){toast(e.message,true);}finally{startingMission=false;}
 }
 async function mutate(action,payload,success="ثبت شد"){
  const r=await call(action,payload);toast(success);
@@ -286,25 +261,27 @@ async function mutate(action,payload,success="ثبت شد"){
 document.addEventListener("click",async e=>{
  if(!e.target.closest(".calendar-field"))closeDiscountCalendars();
  const el=e.target.closest("[data-nav],[data-action],#logout-btn,#coinplus");if(!el)return;
- if(el.id==="logout-btn"||el.dataset.action==="logout"){await client.auth.signOut();return;}
+ if(el.id==="logout-btn"||el.dataset.action==="logout"){await call("heartbeat",{online:false}).catch(()=>{});await galaxy.leave();galaxy.disconnect();await client.auth.signOut();return;}
  if(el.id==="coinplus"){navigate("buycoins");return;}
  if(el.dataset.nav){navigate(el.dataset.nav);return;}
  const action=el.dataset.action,id=el.dataset.id;
+ if(el.dataset.busy)return;el.dataset.busy="true";
  try{
+  if(await galaxy.action(action,id,el))return;
   if(action==="auth-login"||action==="auth-register"){state.authTab=action==="auth-login"?"login":"register";renderAuth();}
   if(action==="refresh")await refresh(false);
   if(action==="refresh-startup")window.location.reload();
   if(action==="chapter"){state.chapter=Number(id);renderLevels();}
   if(action==="start-level")await startLevel(Number(id));
   if(action==="retry-level")await startLevel(Number(id));
-  if(action==="leave-game"){if(confirm("نبرد را بدون پاداش ترک می‌کنی؟"))navigate("levels");}
+  if(action==="leave-game"){await galaxy.leave();return;}
   if(action==="buy-package"){const p=state.data.packages.find(p=>p.id===id);if(p&&confirm("خرید «"+p.title+"» با "+num(p.coins)+" سکه تأیید می‌شود؟"))await mutate("buy",{package_id:id},"بسته خریداری شد.");}
   if(action==="daily"){const r=await call("daily");const d=Array.isArray(r)?r[0]:r;toast(d?.reward?"پاداش "+num(d.reward)+" سکه دریافت شد.":"پاداش امروز قبلاً دریافت شده است.");await refresh(false);}
   if(action==="generate-link"){const r=await call("link");$("#link-result").innerHTML='<div class="notice">کد اتصال: <code>'+esc(r.code)+'</code> <button class="ghost small" data-action="copy-code" data-code="'+esc(r.code)+'">رونوشت</button></div>';}
   if(action==="copy-code"){await navigator.clipboard.writeText(el.dataset.code);toast("کد کپی شد.");}
   if(action==="open-bale"){const url=state.data.settings?.bale_url;if(url&&/^https:\/\/(ble\.ir|bale\.ai)\//.test(url))window.open(url,"_blank","noopener,noreferrer");else toast("لینک بازوی بله هنوز ثبت نشده است.",true);}
   if(action==="open-ticket")await openTicket(id);
-  if(action==="back-tickets"){state.currentTicket=null;state.ticketDetails=null;navigate(state.data.admin?"admin":"support");}
+  if(action==="back-tickets"){state.currentTicket=null;state.ticketDetails=null;navigate("admin");}
   if(action==="ticket-file"){const d=await call("ticketFile",{path:el.dataset.path});if(d?.signedUrl)window.open(d.signedUrl,"_blank","noopener,noreferrer");}
   if(action==="admin-tab"){state.adminTab=id;state.adminPage=0;state.adminData=null;state.editingUser=null;state.editingPackage=null;state.editingDiscount=null;renderAdmin();}
   if(action==="admin-page"){state.adminPage=Math.max(0,state.adminPage+Number(el.dataset.step||0));state.adminData=null;renderAdmin();}
@@ -335,12 +312,15 @@ document.addEventListener("click",async e=>{
   if(action==="edit-package"){state.editingPackage=id;renderAdmin();}
   if(action==="new-package"){state.editingPackage=null;renderAdmin();}
  }catch(err){toast(err.message,true);}
+ finally{delete el.dataset.busy;}
 });
 document.addEventListener("submit",async e=>{
  const form=e.target;if(!(form instanceof HTMLFormElement))return;
  e.preventDefault();const id=form.id,b=formObj(form),button=form.querySelector('button[type="submit"]');
+ if(form.dataset.busy)return;form.dataset.busy="true";
  if(button)button.disabled=true;
  try{
+  if(await galaxy.submit(form))return;
   if(id==="login-form"){
    const name=String(b.username||"").toLowerCase();
    if(!/^[a-z0-9_]{3,24}$/.test(name))throw Error("نام کاربری نامعتبر است.");
@@ -353,12 +333,6 @@ document.addEventListener("submit",async e=>{
    await call("register",{...b,username:String(b.username).toLowerCase()});
    toast("حساب ایجاد شد. اکنون وارد شوید.");state.authTab="login";renderAuth();
   }
-  if(id==="new-ticket"){
-   const t=await call("newTicket",{subject:b.subject,message:b.message});
-   const file=form.querySelector('[name="attachment"]').files?.[0];
-   if(file){const path=await uploadAttachment(t.id,file);await call("replyTicket",{ticket_id:t.id,path,message:""});}
-   toast("تیکت ثبت شد.");await refresh(false);
-  }
   if(id==="reply-ticket"){
    const file=form.querySelector('[name="attachment"]').files?.[0];
    const path=file?await uploadAttachment(state.currentTicket,file):null;
@@ -368,7 +342,7 @@ document.addEventListener("submit",async e=>{
   if(id==="admin-ticket"){await mutate("adminTicket",{id:b.id,status:b.status,file_limit:Number(b.file_mb)*1048576});state.ticketDetails=await call("ticketMessages",{ticket_id:state.currentTicket});renderTicket();}
   if(id==="admin-user"){await mutate("adminUser",{...b,active:b.active==="true",password:b.password||undefined});state.editingUser=null;renderAdmin();}
   if(id==="admin-coins"){await mutate("adminCoins",{id:b.id,delta:Number(b.delta)});}
-  if(id==="admin-package"){await mutate("adminPackage",{...b,coins:Number(b.coins),active:!!form.elements.namedItem("active").checked});state.editingPackage=null;renderAdmin();}
+  if(id==="admin-package"){await mutate("adminPackage",{...b,coins:Number(b.coins),active:!!form.elements.namedItem("active").checked,auto_shield:form.elements.auto_shield.checked});state.editingPackage=null;renderAdmin();}
   if(id==="admin-discount"){
    if(b.kind==="percent"&&Number(b.value)>100)throw Error("درصد تخفیف حداکثر ۱۰۰ است.");
    const date_unlimited=form.elements.namedItem("date_unlimited").checked;
@@ -381,7 +355,7 @@ document.addEventListener("submit",async e=>{
   if(id==="admin-notice"){await mutate("adminNotice",{title:b.title,body:b.body});}
   if(id==="admin-settings"){const r=await mutate("adminSettings",{price_rial_per_coin:Number(b.price_rial_per_coin),bale_url:b.bale_url,bot_token:b.bot_token,provider_token:b.provider_token});toast("تنظیمات ثبت شد. وضعیت وب‌هوک: "+esc(r.webhook));}
  }catch(err){toast(err.message,true);}
- finally{if(button&&button.isConnected)button.disabled=false;}
+ finally{delete form.dataset.busy;if(button&&button.isConnected)button.disabled=false;}
 });
 document.addEventListener("change",e=>{if(e.target.matches("#admin-discount [name=date_unlimited]"))syncDiscountDateFields(e.target.form);if(e.target.matches("#admin-discount [name=kind]"))syncDiscountValueField(e.target.form);});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDiscountCalendars();});
